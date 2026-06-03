@@ -1,0 +1,41 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Local runtime data
+quantumflow.db
+my_db/
+generated_repos/
+patches/
+*.log
+
+# Local credentials and connector secrets
+connector.config.json
+.env
+.env.*
+!.env.example
+
+# Desktop / frontend dependencies
+desktop-electron/node_modules/
+node_modules/
+dist/
+build/
+release/
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local network / tunnel artifacts
+firewall_8765.txt
+zerotier_*_result.txt
+zerotier_status.txt
+tmp_git_source_for_sync.git/
+
+# Local-only tooling cache
+tools/

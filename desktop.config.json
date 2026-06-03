@@ -1,0 +1,14 @@
+{
+  "appName": "QuantumFlow Desktop",
+  "host": "127.0.0.1",
+  "bindHost": "0.0.0.0",
+  "port": 8765,
+  "defaultPath": "/war-room",
+  "platformPath": "/platform",
+  "adminPath": "/admin",
+  "window": {
+    "width": 1680,
+    "height": 980,
+    "zoomFactor": 0.6
+  }
+}

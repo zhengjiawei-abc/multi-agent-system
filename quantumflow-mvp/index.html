@@ -1,0 +1,940 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QuantumFlow Desktop</title>
+    <link rel="stylesheet" href="/styles.css?v=20260603-codex-after-user" />
+  </head>
+  <body class="auth-mode">
+    <header class="desktop-chrome" id="desktopChrome" aria-label="QuantumFlow desktop titlebar">
+      <div class="desktop-chrome-drag">
+        <div class="desktop-chrome-title"><span class="desktop-chrome-mark">QF</span>QuantumFlow Desktop</div>
+      </div>
+      <div class="desktop-zoom-control" aria-label="桌面缩放">
+        <button type="button" id="desktopZoomOutBtn" title="缩小">−</button>
+        <span id="desktopZoomValue">90%</span>
+        <button type="button" id="desktopZoomInBtn" title="放大">+</button>
+      </div>
+      <div class="desktop-chrome-controls">
+        <button type="button" id="desktopMinimizeBtn" title="最小化">−</button>
+        <button type="button" id="desktopMaximizeBtn" title="最大化">□</button>
+        <button type="button" id="desktopCloseBtn" title="关闭">×</button>
+      </div>
+    </header>
+    <section class="auth-shell active" id="authShell" aria-hidden="false">
+      <div class="auth-orbit">
+        <div class="auth-brand">
+          <div class="brand-mark">QF</div>
+          <div>
+            <span>QuantumFlow Beta</span>
+            <h1>协作开发登录台</h1>
+            <p>测试版先支持局域网朋友注册、登录和联机协作。验证码会在页面上显示为 dev_code，后续可以替换成真实邮箱或短信发送。</p>
+          </div>
+        </div>
+        <div class="auth-grid">
+          <article class="auth-card active" id="loginPanel">
+            <div class="auth-card-head"><span>Login</span><h2>登录</h2></div>
+            <form class="auth-form" id="loginForm">
+              <label><span>账号 / 邮箱 / 手机 / 显示名</span><input id="loginAccount" type="text" autocomplete="username" /></label>
+              <label><span>密码</span><input id="loginPassword" type="password" autocomplete="current-password" /></label>
+              <div class="auth-remember-row">
+                <label><input id="rememberAccount" type="checkbox" checked /> <span>记住账号</span></label>
+                <label><input id="rememberPassword" type="checkbox" /> <span>记住密码</span></label>
+                <span>当天免登录</span>
+              </div>
+              <button type="submit">进入战情台</button>
+            </form>
+            <div class="auth-links">
+              <button type="button" data-auth-view="register">注册新账号</button>
+              <button type="button" data-auth-view="forgot">忘记密码</button>
+            </div>
+          </article>
+
+          <article class="auth-card" id="registerPanel">
+            <div class="auth-card-head"><span>Register</span><h2>注册</h2></div>
+            <form class="auth-form" id="registerForm">
+              <label><span>用户名</span><input id="registerUsername" type="text" autocomplete="username" /></label>
+              <label><span>显示名称</span><input id="registerDisplayName" type="text" autocomplete="name" /></label>
+              <label><span>邮箱或手机号</span><input id="registerTarget" type="text" autocomplete="email" /></label>
+              <div class="auth-code-row">
+                <input id="registerCode" type="text" placeholder="验证码" />
+                <button type="button" id="sendRegisterCodeBtn">发送验证码</button>
+              </div>
+              <label><span>密码</span><input id="registerPassword" type="password" autocomplete="new-password" /></label>
+              <button type="submit">创建测试账号</button>
+            </form>
+            <div class="auth-links"><button type="button" data-auth-view="login">已有账号，去登录</button></div>
+          </article>
+
+          <article class="auth-card" id="forgotPanel">
+            <div class="auth-card-head"><span>Recovery</span><h2>找回密码</h2></div>
+            <form class="auth-form" id="forgotForm">
+              <label><span>邮箱或手机号</span><input id="forgotTarget" type="text" /></label>
+              <div class="auth-code-row">
+                <input id="forgotCode" type="text" placeholder="验证码" />
+                <button type="button" id="sendForgotCodeBtn">发送验证码</button>
+              </div>
+              <label><span>新密码</span><input id="forgotPassword" type="password" autocomplete="new-password" /></label>
+              <button type="submit">重置密码</button>
+            </form>
+            <div class="auth-links"><button type="button" data-auth-view="login">返回登录</button></div>
+          </article>
+        </div>
+        <div class="auth-status" id="authStatus">测试版身份系统待登录。</div>
+      </div>
+    </section>
+
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">QF</div>
+          <div>
+            <div class="brand-title">QuantumFlow</div>
+            <div class="brand-subtitle">Agent Teams</div>
+          </div>
+        </div>
+
+        <section class="side-section">
+          <div class="section-title">
+            <span>运行中</span>
+            <span class="count-pill" id="runningCount">5</span>
+          </div>
+          <button class="team-card active">
+            <span class="live-dot"></span>
+            <span>
+              <strong>OpenClaw 多智能体开发队</strong>
+              <small>桌面端 MVP / 可视化调度</small>
+            </span>
+          </button>
+        </section>
+
+        <section class="side-section">
+          <div class="section-title">
+            <span>任务队列</span>
+            <span class="count-pill" id="taskCount">6</span>
+          </div>
+          <form class="task-form" id="taskForm">
+            <input id="taskInput" type="text" placeholder="添加开发任务 / 外部消息" />
+            <select id="ownerSelect">
+              <option value="master">负责人</option>
+              <option value="frontend">前端</option>
+              <option value="backend">后端</option>
+              <option value="tester">测试</option>
+              <option value="reviewer">审查</option>
+            </select>
+            <button type="submit">添加</button>
+          </form>
+          <div class="task-list" id="taskList"></div>
+        </section>
+      </aside>
+
+      <main class="main" id="mainView">
+        <header class="topbar">
+          <div>
+            <div class="project-kicker">SpectrAI / QuantumFlow</div>
+            <h1 id="pageTitle">QuantumFlow 调度中枢</h1>
+          </div>
+          <div class="top-actions">
+            <button class="tab-button active" data-view="warRoom">战情室</button>
+            <button class="tab-button" data-view="community">源文明</button>
+            <button class="tab-button" data-view="openSourceWorld">开源世界</button>
+            <button class="tab-button locked" data-view="developerAdmin">开发者管理中心</button>
+            <button class="user-chip" id="authUserBtn" type="button">登录 / 注册</button>
+            <button class="icon-button" id="pauseBtn" title="暂停/继续">⏸</button>
+            <button class="primary-button" id="nextBtn">分发下一步</button>
+          </div>
+        </header>
+
+        <section class="agent-strip" id="agentStrip"></section>
+
+        <section class="workspace view-panel active" id="warRoomView">
+          <div class="metrics">
+            <div class="metric"><span>成员</span><strong id="memberMetric">5</strong></div>
+            <div class="metric"><span>任务</span><strong id="taskMetric">0/6</strong></div>
+            <div class="metric"><span>阻塞</span><strong id="blockedMetric">0</strong></div>
+          </div>
+
+          <section class="business-flow">
+            <div class="flow-title">
+              <span>业务流</span>
+              <strong>任务进入后，前端 Agent 和后端 Agent 同步开发，测试 Agent 验收，Reviewer 判断归属并仲裁</strong>
+            </div>
+            <div class="flow-steps">
+              <div class="flow-step active"><b>01</b><strong>App 入口</strong><span>企业微信 / 飞书 / 微信客服 / 抖音</span></div>
+              <i></i>
+              <div class="flow-step"><b>02</b><strong>任务队列</strong><span>InboundTask 转 Issue</span></div>
+              <i></i>
+              <div class="flow-step"><b>03</b><strong>并行开发</strong><span>前端 Agent + 后端 Agent 同步写代码</span></div>
+              <i></i>
+              <div class="flow-step"><b>04</b><strong>测试 / 审查</strong><span>测试 Agent 验收，Reviewer 判断问题归属</span></div>
+              <i></i>
+              <div class="flow-step"><b>05</b><strong>定向修复</strong><span>派给对应 Agent 修复并反馈</span></div>
+            </div>
+          </section>
+
+          <div class="room-wrap">
+            <div class="room-toolbar">
+              <span>办公室缩放 · 拖拽平移 · 100%</span>
+              <div>
+                <button class="mini-button" id="autoBtn">自动演示</button>
+                <button class="mini-button" id="resetBtn">重置</button>
+              </div>
+            </div>
+            <div class="room" id="room">
+              <div class="room-stage">
+                <div class="room-scene">
+                  <div class="wall">
+                    <div class="board board-left"><span>指令队列</span><strong id="queueBoard">6 pending</strong></div>
+                    <div class="board board-center"><span>完成率</span><div class="bar"><i id="progressBar"></i></div><small id="progressText">0%</small></div>
+                    <div class="board board-right compact"><span>当前阶段</span><strong>编码 / 测试 / Review</strong></div>
+                  </div>
+                  <div class="floor-grid"></div>
+                  <div class="desk desk-a"></div>
+                  <div class="desk desk-b"></div>
+                  <div class="desk desk-c"></div>
+                  <div class="terminal terminal-a">TERMINAL</div>
+                  <div class="terminal terminal-b">BUILD</div>
+                  <div class="terminal terminal-c">REVIEW</div>
+                  <div class="power-bar">POWER_BAR</div>
+                  <div class="plant"></div>
+                  <div class="agent-layer" id="agentLayer"></div>
+                  <section class="agent-quick-panel" id="agentQuickPanel" aria-hidden="true">
+                    <div class="agent-quick-head">
+                      <div><span id="agentQuickKicker">Agent Studio</span><h3 id="agentQuickTitle">可视化编程速览</h3></div>
+                      <button class="agent-quick-close" id="agentQuickClose" type="button" title="关闭">×</button>
+                    </div>
+                    <div class="agent-quick-body">
+                      <div class="agent-quick-code" id="agentQuickCode"></div>
+                      <aside class="agent-quick-explain" id="agentQuickExplain"></aside>
+                    </div>
+                    <div class="agent-quick-actions"><button id="agentQuickEditorBtn" type="button">进入完整编辑器</button></div>
+                  </section>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="community-view view-panel" id="communityView">
+          <div class="open-world qf-world">
+            <aside class="qf-rail">
+              <section class="qf-panel qf-repos">
+                <div class="qf-panel-head"><h3>内部仓库</h3><button type="button">New</button></div>
+                <input class="repo-search" type="text" placeholder="搜索仓库 / Connector / Agent..." />
+                <div class="repo-list" id="repoList"></div>
+              </section>
+              <section class="qf-panel">
+                <div class="qf-panel-head"><h3>在线协作者</h3><span id="onlineMiniCount">18</span></div>
+                <div class="people-list" id="peopleList"></div>
+              </section>
+            </aside>
+
+            <main class="qf-main">
+              <section class="qf-hero">
+                <div>
+                  <span>QuantumFlow Internal Hub</span>
+                  <h2>源文明</h2>
+                  <p>先把 Agent 协作、代码 Review、投票采纳、补丁校验和 App 反馈链路打磨稳定，再决定是否公开成真正的开源社区。</p>
+                </div>
+                <div class="qf-hero-metrics">
+                  <div><strong>3</strong><span>仓库</span></div>
+                  <div><strong id="worldTaskCount">0</strong><span>开放任务</span></div>
+                  <div><strong id="onlineCount">18</strong><span>在线</span></div>
+                </div>
+              </section>
+
+              <section class="qf-flow">
+                <article><b>01</b><strong>入口</strong><span>企业微信 / 飞书 / 抖音 / 微信客服</span></article>
+                <i></i>
+                <article><b>02</b><strong>任务</strong><span>消息转 Issue 与 InboundTask</span></article>
+                <i></i>
+                <article><b>03</b><strong>并行开发</strong><span>前端 Agent 与后端 Agent 同步产出代码</span></article>
+                <i></i>
+                <article><b>04</b><strong>测试审查</strong><span>测试 Agent 验收，Reviewer 判断问题归属</span></article>
+                <i></i>
+                <article><b>05</b><strong>修复反馈</strong><span>派回对应 Agent 修复，结果回传原会话</span></article>
+              </section>
+
+              <section class="qf-board">
+                <div class="qf-issue-panel">
+                  <div class="qf-panel-head"><h3>内部任务 / Issues</h3><span>来自 Connector、战情室和手动创建</span></div>
+                  <div class="issue-strip" id="communityIssues"></div>
+                </div>
+                <div class="qf-connector-panel">
+                  <div class="qf-panel-head"><h3>Connector 状态</h3><span>入口健康</span></div>
+                  <div class="connector-grid">
+                    <div><strong>企业微信</strong><span>connected</span></div>
+                    <div><strong>飞书</strong><span>challenge ok</span></div>
+                    <div><strong>抖音</strong><span>planned</span></div>
+                    <div><strong>微信客服</strong><span>planned</span></div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="open-world-commandbar">
+                <div><span>QuantumFlow Source Civilization</span><strong>当前工作台：代码区 + 评论区</strong></div>
+                <div class="open-world-actions">
+                  <button class="active" type="button" data-world-panel-target="codePanel">Code</button>
+                  <button type="button" data-world-panel-target="repositoriesPanel">仓库</button>
+                  <button type="button" data-world-panel-target="issuesPanel">Issues</button>
+                  <button type="button" data-world-panel-target="taskLogsPanel">历史任务</button>
+                  <button type="button" data-world-panel-target="connectorsPanel">Connector</button>
+                  <button class="primary" type="button" data-world-panel-target="botPanel">飞书 Bot</button>
+                  <button type="button" data-world-panel-target="governancePanel">队长 / 合并</button>
+                  <button type="button" data-world-panel-target="recordsPanel">采纳记录</button>
+                  <button type="button" data-world-panel-target="notificationsPanel">通知 / 飞书</button>
+                </div>
+              </section>
+
+              <section class="qf-code code-browser open-world-content-panel active" id="codePanel">
+                <div class="code-browser-head">
+                  <div><span id="activeRepoOwner">QuantumFlow</span><h3 id="activeRepoName">quantumflow-runtime</h3></div>
+                  <div class="coding-mode-switch" role="tablist" aria-label="编码模式">
+                    <button class="active" type="button" data-coding-mode="auto">自动编码</button>
+                    <button type="button" data-coding-mode="manual">手动编码</button>
+                  </div>
+                </div>
+                <div class="code-layout">
+                  <div class="file-tree" id="fileTree"></div>
+                  <div class="file-viewer">
+                    <div class="file-viewer-head">
+                      <span id="activeFileName">server.py</span>
+                      <div class="file-edit-actions">
+                        <span id="manualEditState">main · latest</span>
+                        <button id="manualCompleteBtn" type="button" hidden>补全代码</button>
+                        <button id="manualSaveBtn" type="button" hidden>保存</button>
+                        <button id="manualCancelBtn" type="button" hidden>取消</button>
+                      </div>
+                    </div>
+                    <section class="auto-code-panel active" id="autoCodePanel">
+                      <div class="auto-code-brand"><strong>Agent 编排控制台</strong><button type="button" data-coding-mode="manual" title="切到手动编码">×</button></div>
+                      <div class="auto-code-hero">
+                        <div class="auto-code-icon">FLOW</div>
+                        <h3>把需求交给多智能体流水线</h3>
+                        <p>任务会先进入 Master 仲裁，再交给对应 Agent 编码、测试、审查和回写。</p>
+                      </div>
+                      <div class="auto-code-points">
+                        <span>Master 判断任务归属和执行顺序</span>
+                        <span>Agent 输出代码后进入 Review 门禁</span>
+                        <span>结果写入代码区，评论区继续投票修正</span>
+                      </div>
+                      <div class="auto-agent-grid" aria-label="选择 Agent">
+                        <button class="active frontend-agent" type="button" data-auto-agent="frontend"><i>UI</i><strong>前端 Agent</strong><span>界面 / 交互</span></button>
+                        <button class="backend-agent" type="button" data-auto-agent="backend"><i>API</i><strong>后端 Agent</strong><span>接口 / 数据</span></button>
+                        <button class="tester-agent" type="button" data-auto-agent="tester"><i>QA</i><strong>测试 Agent</strong><span>验收 / 校验</span></button>
+                        <button class="reviewer-agent" type="button" data-auto-agent="reviewer"><i>RV</i><strong>Reviewer</strong><span>Review / 补丁</span></button>
+                      </div>
+                      <div class="agent-arbitration-note" id="agentArbitrationNote">Master 会根据需求自动推荐最合适的 Agent。</div>
+                      <form id="autoCodeForm" class="auto-code-form">
+                        <textarea id="autoCodeInput" placeholder="/code 优化这个页面的按钮间距和评论区布局"></textarea>
+                        <select id="autoCodeOwner" class="agent-owner-select" aria-label="当前 Agent">
+                          <option value="frontend">前端 Agent</option>
+                          <option value="backend">后端 Agent</option>
+                          <option value="tester">测试 Agent</option>
+                          <option value="reviewer">Reviewer</option>
+                        </select>
+                        <button type="submit">启动 Agent</button>
+                      </form>
+                    </section>
+                    <pre id="repoCodeView"></pre>
+                    <textarea id="manualCodeEditor" class="manual-code-editor" aria-hidden="true"></textarea>
+                  </div>
+                </div>
+                <section class="code-review-comments">
+                  <div class="review-panel-head"><div><span>Review</span><h3>代码区评论</h3></div><button id="adoptSuggestionBtn" type="button">生成候选补丁</button></div>
+                  <div class="patch-preview-panel" id="patchPreviewPanel"><div class="patch-preview-empty">暂无候选补丁。先给建议投票，再生成候选。</div></div>
+                  <div class="live-comments" id="liveComments"></div>
+                  <form class="comment-form" id="commentForm">
+                    <select id="commentKind">
+                      <option value="建议">建议</option>
+                      <option value="问题">问题</option>
+                      <option value="采纳意见">采纳意见</option>
+                    </select>
+                    <input id="commentInput" type="text" placeholder="给当前代码区提建议..." />
+                    <button type="submit">发送</button>
+                  </form>
+                </section>
+              </section>
+              <section class="open-world-content-panel qf-panel" id="issuesPanel">
+                <div class="qf-panel-head"><h3>内部任务 / Issues</h3><span>来自 Connector、战情室和手动创建</span></div>
+                <form class="issue-create-form" id="issueCreateForm">
+                  <div class="issue-create-main">
+                    <input id="issueKeywordInput" type="text" placeholder="输入关键词，例如：登录页 验证码 用户资料页" />
+                    <input id="issueFileInput" type="file" />
+                    <select id="issueAgentSelect">
+                      <option value="master">Master 自动分配</option>
+                      <option value="frontend">前端 Agent</option>
+                      <option value="backend">后端 Agent</option>
+                      <option value="tester">测试 Agent</option>
+                      <option value="reviewer">Reviewer</option>
+                    </select>
+                    <button type="button" id="issueDescribeBtn">生成需求</button>
+                    <button type="submit">生成并执行</button>
+                  </div>
+                  <textarea id="issueDescriptionInput" placeholder="系统会根据关键词和文件自动整理任务需求，也可以在这里手动补充验收标准..."></textarea>
+                </form>
+                <div class="issue-window-list" id="issueInlineList"></div>
+              </section>
+
+              <section class="open-world-content-panel qf-panel" id="taskLogsPanel">
+                <div class="qf-panel-head"><h3>历史任务 / 执行日志</h3><span>Agent 动作、输入输出、状态复盘</span></div>
+                <div class="task-log-list" id="taskLogInlineList"></div>
+              </section>
+
+              <section class="open-world-content-panel qf-panel" id="connectorsPanel">
+                <div class="qf-panel-head"><h3>Connector 状态</h3><span>入口健康</span></div>
+                <div class="connector-grid connector-window-grid"><div><strong>企业微信</strong><span>connected</span></div><div><strong>飞书</strong><span>challenge ok</span></div><div><strong>抖音</strong><span>planned</span></div><div><strong>微信客服</strong><span>planned</span></div></div>
+              </section>
+
+              <section class="open-world-content-panel qf-panel" id="governancePanel">
+                <div class="qf-panel-head"><h3>队长投票 / 合并门禁</h3><span id="captainInlineName">未选出</span></div>
+                <div class="inline-governance-grid"><div class="captain-votes" id="captainVoteInlineList"></div><div class="gate-list"><div><b></b><span>建议投票最高</span></div><div><b></b><span>语法校验通过</span></div><div><b></b><span>Reviewer 无阻塞</span></div><div><b></b><span>结果可回传 App</span></div></div></div>
+              </section>
+
+              <section class="open-world-content-panel qf-panel" id="recordsPanel">
+                <div class="qf-panel-head"><h3>采纳记录</h3><span>Review 通过后的真实记录</span></div>
+                <div class="patch-history-list" id="patchHistoryInlineList"></div>
+              </section>
+
+              <section class="open-world-content-panel qf-panel" id="notificationsPanel">
+                <div class="qf-panel-head"><h3>通知队列 / 手动飞书</h3><span>任务结果回传外部会话</span></div>
+                <div class="notification-inline-grid"><div class="patch-history-list" id="outboxInlineList"></div><form class="bot-chat-form inline-bot-form" id="manualFeishuForm"><input id="manualFeishuInput" type="text" placeholder="输入要发到飞书群的消息" /><button type="submit">发送</button></form></div>
+              </section>
+
+              <section class="open-world-content-panel qf-panel" id="botPanel">
+                <div class="qf-panel-head"><h3>飞书 Bot 会话</h3><span>直接和 Bot 对话</span></div>
+                <div class="bot-chat-list inline-bot-list" id="botInlineList"></div>
+                <form class="bot-chat-form inline-bot-form" id="botInlineForm"><input id="botInlineInput" type="text" placeholder="/issue 任务、/code 开发需求、/status、/help" /><button type="submit">发送</button></form>
+              </section>
+
+            </main>
+          </div>
+        </section>
+
+        <section class="open-source-world-view view-panel" id="openSourceWorldView">
+          <div class="osw-shell">
+            <aside class="osw-sidebar">
+              <div class="osw-brand">
+                <div class="brand-mark">源</div>
+                <div>
+                  <strong>开源世界</strong>
+                  <span>Public QuantumFlow Hub</span>
+                </div>
+              </div>
+              <button class="osw-nav active" type="button" data-osw-panel-target="oswDashboardPanel">仪表盘</button>
+              <button class="osw-nav" type="button" data-osw-panel-target="oswReposPanel">仓库</button>
+              <button class="osw-nav" type="button" data-osw-panel-target="oswIssuesPanel">议题</button>
+              <button class="osw-nav" type="button" data-osw-panel-target="oswPullsPanel">拉取请求</button>
+              <button class="osw-nav" type="button" data-osw-panel-target="oswAuditPanel">Agent 审计</button>
+              <button class="osw-nav" type="button" data-osw-panel-target="oswJoinProjectPanel">加入项目</button>
+              <button class="osw-nav" type="button" data-osw-panel-target="oswChatPanel">公开聊天</button>
+              <section class="osw-card">
+                <div class="qf-panel-head">
+                  <h3>顶级仓库</h3>
+                  <button type="button" data-osw-panel-target="oswNewRepoPanel">新建</button>
+                </div>
+                <div class="osw-repo-list" id="publicRepoSidebarList">
+                  <button><strong>quantumflow-runtime</strong><span>调度 / WebSocket / Connector</span></button>
+                  <button><strong>agent-desktop</strong><span>战情室 / 源文明 / UI</span></button>
+                  <button><strong>app-connectors</strong><span>飞书 / 企业微信 / 微信客服</span></button>
+                </div>
+              </section>
+            </aside>
+
+            <main class="osw-main">
+              <section class="osw-page-panel active" id="oswDashboardPanel">
+                <header class="osw-top">
+                  <div>
+                    <span>Open Source World</span>
+                    <h2>开源世界</h2>
+                  </div>
+                  <div class="osw-search">
+                    <input type="text" placeholder="搜索仓库、议题、Agent、贡献者..." />
+                    <button type="button">搜索</button>
+                  </div>
+                </header>
+
+                <section class="osw-compose">
+                  <textarea id="oswComposeInput" placeholder="可以提问，或输入 @Agent 补充背景"></textarea>
+                  <div>
+                    <button type="button" data-osw-action="issue">创建议题</button>
+                    <button type="button" data-osw-action="code">编写代码</button>
+                    <button type="button" data-osw-action="pull">拉取请求</button>
+                    <button type="button" data-osw-action="audit">请求 Agent 审计</button>
+                  </div>
+                </section>
+
+                <section class="osw-grid">
+                  <article class="osw-card osw-feed">
+                    <div class="qf-panel-head">
+                      <h3>公开动态</h3>
+                      <span>仓库 / PR / Agent</span>
+                    </div>
+                    <div class="osw-feed-list" id="publicFeedList">
+                      <div class="osw-feed-item">
+                        <b>Assistant</b>
+                        <strong>运行前端静态校验，等待完整冒烟测试。</strong>
+                        <p>结论：已完成语法和路由级检查。下一步由 Tester Agent 触发真实冒烟测试，并把结果写入公开日志。</p>
+                        <em>Agent 审计 · just now</em>
+                      </div>
+                      <div class="osw-feed-item">
+                        <b>Reviewer Agent</b>
+                        <strong>候选补丁需要先通过语法校验。</strong>
+                        <p>投票最高的建议会进入候选补丁，但只有校验通过后才能写入仓库。</p>
+                        <em>Review Gate · 12 min ago</em>
+                      </div>
+                      <div class="osw-feed-item">
+                        <b>Backend Agent</b>
+                        <strong>新增 API Registry 与成员管理接口。</strong>
+                        <p>接口和成员现在会落库，支持添加、删除和实时刷新。</p>
+                        <em>Commit · 28 min ago</em>
+                      </div>
+                    </div>
+                  </article>
+
+                  <article class="osw-card osw-issues">
+                    <div class="qf-panel-head">
+                      <h3>分配给我</h3>
+                      <button type="button">新一期</button>
+                    </div>
+                    <div id="publicAssignedIssuesList">
+                      <div class="osw-issue-row"><strong>优化开源世界的 GitHub 风格布局</strong><span>open · Frontend Agent</span></div>
+                      <div class="osw-issue-row"><strong>验证 Agent 生成项目可运行</strong><span>open · Tester Agent</span></div>
+                      <div class="osw-issue-row"><strong>公开聊天接入真实用户身份</strong><span>planned · Backend Agent</span></div>
+                    </div>
+                  </article>
+
+                  <article class="osw-card osw-repo-preview">
+                    <div class="qf-panel-head">
+                      <h3>仓库预览</h3>
+                      <span>quantumflow-runtime</span>
+                    </div>
+                    <div class="osw-file"><span>server.py</span><em>FastAPI runtime</em></div>
+                    <div class="osw-file"><span>storage.py</span><em>SQLite persistence</em></div>
+                    <div class="osw-file"><span>quantumflow-mvp/app.js</span><em>desktop UI</em></div>
+                    <div class="osw-file"><span>README.md</span><em>project guide</em></div>
+                  </article>
+                </section>
+              </section>
+
+              <section class="osw-page-panel osw-placeholder-panel" id="oswReposPanel">
+                <div class="qf-panel-head">
+                  <h3>仓库</h3>
+                  <span>QuantumFlow 风格的公开代码仓库</span>
+                </div>
+                <div class="osw-repo-list" id="publicRepoList">
+                  <button><strong>quantumflow-runtime</strong><span>调度 / WebSocket / Connector</span></button>
+                  <button><strong>agent-desktop</strong><span>战情室 / 源文明 / UI</span></button>
+                  <button><strong>app-connectors</strong><span>飞书 / 企业微信 / 微信客服</span></button>
+                </div>
+              </section>
+
+              <section class="osw-page-panel osw-placeholder-panel osw-new-repo-panel" id="oswNewRepoPanel">
+                <div class="qf-panel-head">
+                  <h3>新建仓库</h3>
+                  <span>创建后会进入公开仓库列表和动态流</span>
+                </div>
+                <form class="osw-new-repo-form" id="oswNewRepoForm">
+                  <label><span>仓库名称</span><input id="oswRepoNameInput" type="text" placeholder="quantumflow-plugin" /></label>
+                  <label><span>仓库描述</span><input id="oswRepoDescInput" type="text" placeholder="多智能体插件、Connector 或工具模块" /></label>
+                  <label>
+                    <span>主要语言</span>
+                    <select id="oswRepoLangInput">
+                      <option value="Python">Python</option>
+                      <option value="JavaScript">JavaScript</option>
+                      <option value="TypeScript">TypeScript</option>
+                      <option value="Webhook">Webhook</option>
+                    </select>
+                  </label>
+                  <div class="osw-new-repo-actions">
+                    <button type="submit">创建仓库</button>
+                    <button type="button" data-osw-panel-target="oswReposPanel">返回仓库</button>
+                  </div>
+                </form>
+              </section>
+
+              <section class="osw-page-panel osw-placeholder-panel osw-detail-panel" id="oswRepoDetailPanel">
+                <div class="osw-detail-body" id="oswRepoDetail"></div>
+              </section>
+
+              <section class="osw-page-panel osw-placeholder-panel" id="oswIssuesPanel">
+                <div class="qf-panel-head">
+                  <h3>议题</h3>
+                  <span>公开需求、缺陷和 Agent 任务建议</span>
+                </div>
+                <div id="publicIssuesList">
+                  <div class="osw-issue-row"><strong>优化开源世界的 GitHub 风格布局</strong><span>open · Frontend Agent</span></div>
+                  <div class="osw-issue-row"><strong>验证 Agent 生成项目可运行</strong><span>open · Tester Agent</span></div>
+                  <div class="osw-issue-row"><strong>公开聊天接入真实用户身份</strong><span>planned · Backend Agent</span></div>
+                </div>
+              </section>
+
+              <section class="osw-page-panel osw-placeholder-panel osw-detail-panel" id="oswIssueDetailPanel">
+                <div class="osw-detail-body" id="oswIssueDetail"></div>
+              </section>
+
+              <section class="osw-page-panel osw-placeholder-panel" id="oswPullsPanel">
+                <div class="qf-panel-head">
+                  <h3>拉取请求</h3>
+                  <span>后续接入真实 GitHub / GitLab 后同步 PR</span>
+                </div>
+                <div id="publicPullsList">
+                  <div class="osw-issue-row"><strong>#18 source-civilization-layout</strong><span>review · Reviewer Agent</span></div>
+                  <div class="osw-issue-row"><strong>#21 feishu-task-loop</strong><span>draft · Backend Agent</span></div>
+                </div>
+              </section>
+
+              <section class="osw-page-panel osw-placeholder-panel osw-detail-panel" id="oswPullDetailPanel">
+                <div class="osw-detail-body" id="oswPullDetail"></div>
+              </section>
+
+              <section class="osw-page-panel osw-placeholder-panel" id="oswAuditPanel">
+                <div class="qf-panel-head">
+                  <h3>Agent 审计</h3>
+                  <span>公开展示 Agent 的执行结论、校验结果和风险说明</span>
+                </div>
+                <div id="publicAuditList">
+                  <div class="osw-feed-item">
+                    <b>Tester Agent</b>
+                    <strong>运行前端静态校验，等待完整冒烟测试。</strong>
+                    <p>下一步需要触发真实冒烟测试，并把结果写入公开日志。</p>
+                    <em>just now</em>
+                  </div>
+                  <div class="osw-feed-item">
+                    <b>Reviewer Agent</b>
+                    <strong>候选补丁必须通过语法校验。</strong>
+                    <p>投票最高的建议进入候选补丁，但只有校验通过后才能写入仓库。</p>
+                    <em>12 min ago</em>
+                  </div>
+                </div>
+              </section>
+
+              <section class="osw-page-panel osw-placeholder-panel osw-detail-panel" id="oswAuditDetailPanel">
+                <div class="osw-detail-body" id="oswAuditDetail"></div>
+              </section>
+
+              <section class="osw-page-panel osw-placeholder-panel osw-join-project-panel" id="oswJoinProjectPanel">
+                <div class="qf-panel-head">
+                  <h3>项目房间</h3>
+                  <span>创建房间、复制邀请码、邀请开发者进入项目协作</span>
+                </div>
+                <div class="osw-room-grid">
+                  <section class="osw-room-card">
+                    <div class="osw-join-copy">
+                      <strong>创建项目房间</strong>
+                      <span>为朋友创建独立开发空间，并生成邀请码。</span>
+                    </div>
+                    <form class="osw-room-form" id="oswProjectRoomForm">
+                      <input id="oswProjectRoomName" type="text" placeholder="项目房间名称，例如 QuantumFlow Core" />
+                      <input id="oswProjectRoomDesc" type="text" placeholder="项目说明 / 当前开发目标" />
+                      <button type="submit">创建房间</button>
+                    </form>
+                    <div class="project-room-result" id="projectRoomResult" hidden></div>
+                    <div class="project-room-list" id="projectRoomList"></div>
+                  </section>
+                  <section class="osw-room-card">
+                    <div class="osw-join-copy">
+                      <strong>开发者加入项目</strong>
+                      <span>登录后的开发者输入邀请码即可加入对应项目房间。</span>
+                    </div>
+                    <form class="osw-room-form join" id="oswJoinProjectForm">
+                      <input id="oswInviteInput" type="text" placeholder="邀请码，例如 QF-ABC123-9F00" />
+                      <button type="submit">加入项目</button>
+                    </form>
+                    <div class="osw-join-result" id="oswJoinResult">等待输入邀请码。</div>
+                    <div class="project-room-list osw-my-room-list" id="oswMyProjectRoomList"></div>
+                  </section>
+                </div>
+              </section>
+
+              <section class="osw-page-panel osw-public-chat-panel" id="oswChatPanel">
+                <div class="osw-chat-head">
+                  <div><span>Public Channel</span><h3>公开聊天</h3></div>
+                  <b>所有用户</b>
+                </div>
+                <div class="bot-chat-list inline-bot-list" id="publicWorldChatList"></div>
+                <form class="bot-chat-form inline-bot-form osw-chat-form" id="publicWorldChatForm">
+                  <input id="publicWorldChatInput" type="text" placeholder="公开讨论项目、提建议、让 Agent 补充上下文..." />
+                  <button type="submit">发送</button>
+                </form>
+              </section>
+            </main>
+
+            <aside class="osw-chat">
+              <section class="qf-panel osw-online-dock">
+                <div class="qf-panel-head"><h3>在线情况</h3><span id="publicWorldOnlineCount">0 online</span></div>
+                <div class="osw-online-summary"><strong id="publicWorldOnlineTotal">0</strong><span>当前在线开发者与 Agent</span></div>
+                <div class="osw-online-list" id="publicWorldOnlineList"></div>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <section class="profile-view view-panel" id="profileView">
+          <div class="profile-page-shell">
+            <aside class="profile-side">
+              <div class="profile-avatar large" id="profileAvatar">QF</div>
+              <div class="profile-identity">
+                <strong id="profileName">未登录</strong>
+                <span id="profileMeta">Beta Developer</span>
+              </div>
+              <button class="profile-edit-button" type="button">编辑个人资料</button>
+              <div class="profile-side-metrics" id="profileSideMetrics"></div>
+              <button class="profile-logout-button" id="logoutBtn" type="button">退出登录</button>
+            </aside>
+            <main class="profile-main-panel">
+              <div class="profile-page-head">
+                <div>
+                  <span>QuantumFlow Profile</span>
+                  <h2>用户信息中心</h2>
+                </div>
+                <p>账号资料、参与项目、协作记录和个人设置集中在这里，进入系统后可随时从右上角用户名打开。</p>
+              </div>
+              <nav class="profile-tabs" aria-label="用户信息导航">
+                <button class="active" type="button" data-profile-tab="overview">Overview</button>
+                <button type="button" data-profile-tab="repositories">Repositories</button>
+                <button type="button" data-profile-tab="projects">Projects</button>
+                <button type="button" data-profile-tab="activity">Activity</button>
+              </nav>
+              <div class="profile-tab-panel active" data-profile-panel="overview">
+                <form class="profile-edit-form" id="profileForm">
+                <label>
+                  <span>显示名称</span>
+                  <input id="profileDisplayName" type="text" />
+                </label>
+                <button type="submit">保存资料</button>
+                <span class="profile-save-state" id="profileSaveState"></span>
+              </form>
+                <div class="profile-overview-grid" id="profileOverviewGrid"></div>
+                <section class="profile-section">
+                  <div class="profile-section-head"><span>Account</span><strong>完整账号信息</strong></div>
+                  <div class="profile-facts" id="profileFacts"></div>
+                </section>
+              </div>
+              <div class="profile-tab-panel" data-profile-panel="repositories">
+                <section class="profile-section">
+                  <div class="profile-section-head"><span>Repositories</span><strong>参与仓库</strong></div>
+                  <div class="profile-repo-list" id="profileRepoList"></div>
+                </section>
+              </div>
+              <div class="profile-tab-panel" data-profile-panel="projects">
+                <section class="profile-section">
+                  <div class="profile-section-head"><span>Projects</span><strong>参与的开发者项目</strong></div>
+                  <div class="profile-room-list" id="profileRoomList"></div>
+                </section>
+              </div>
+              <div class="profile-tab-panel" data-profile-panel="activity">
+                <section class="profile-section">
+                  <div class="profile-section-head"><span>Activity</span><strong>最近协作记录</strong></div>
+                  <div class="profile-activity-list" id="profileActivityList"></div>
+                </section>
+              </div>
+            </main>
+          </div>
+        </section>
+
+        <section class="project-room-view view-panel" id="projectRoomView">
+          <div class="project-room-page-shell">
+            <header class="room-page-head">
+              <div>
+                <span>Project Room</span>
+                <h2 id="roomPageTitle">项目房间</h2>
+                <p id="roomPageDesc">用于朋友和开发者一起闲聊、发思路、发代码、发文件和沉淀项目记录。</p>
+              </div>
+              <div class="room-page-actions">
+                <button type="button" id="roomInviteCopyBtn">复制邀请码</button>
+                <button type="button" id="roomBackBtn">返回开发者中心</button>
+              </div>
+            </header>
+            <main class="room-page-grid">
+              <section class="room-chat-panel">
+                <div class="room-panel-title"><span>Group Chat</span><strong>小组交流</strong></div>
+                <div class="room-message-list" id="roomMessageList"></div>
+                <form class="room-message-form" id="roomMessageForm">
+                  <select id="roomMessageKind">
+                    <option value="chat">闲聊</option>
+                    <option value="idea">思路</option>
+                    <option value="code">代码</option>
+                    <option value="file">文件</option>
+                  </select>
+                  <input id="roomFileInput" type="file" />
+                  <textarea id="roomMessageInput" placeholder="在项目房间里发消息、思路、代码片段，或选择文件后发送文件记录..."></textarea>
+                  <button type="submit">发送</button>
+                </form>
+              </section>
+              <section class="room-doc-panel">
+                <div class="room-panel-title"><span>Docs</span><strong>项目文档</strong></div>
+                <input id="roomDocTitle" type="text" placeholder="文档标题，例如：当前迭代目标" />
+                <textarea id="roomDocContent" placeholder="在这里写项目文档、需求理解、会议纪要、验收标准或接口说明..."></textarea>
+                <div class="room-doc-actions"><span id="roomDocState">本地草稿</span><button type="button" id="roomDocSaveBtn">保存文档</button></div>
+              </section>
+              <section class="room-workspace-panel">
+                <div class="room-panel-title"><span>Pair Workspace</span><strong>多人协同合作</strong></div>
+                <div class="workspace-collab-grid room-collab-grid">
+                  <section class="workspace-command-panel">
+                    <div class="workspace-mini-head"><span>Codex Task</span><strong>交给 Agent</strong></div>
+                    <select class="workspace-room-select" id="workspaceRoomSelect"><option value="">当前项目房间</option></select>
+                    <form class="workspace-task-form" id="workspaceTaskForm">
+                      <textarea id="workspaceTaskInput" placeholder="输入要一起开发的需求，例如：让 Codex 生成登录页并交给战情室 Agent 自动编码。"></textarea>
+                      <div>
+                        <select id="workspaceTaskOwner"><option value="master">Master 协调</option><option value="frontend">Frontend Agent</option><option value="backend">Backend Agent</option><option value="tester">Tester Agent</option><option value="reviewer">Reviewer Agent</option></select>
+                        <button type="submit">交给 Codex / Agent</button>
+                      </div>
+                    </form>
+                    <div class="workspace-task-list" id="workspaceTaskList"></div>
+                  </section>
+                  <section class="workspace-discussion-panel">
+                    <div class="workspace-mini-head"><span>Discussion</span><strong>实现讨论</strong></div>
+                    <div class="workspace-discussion-list" id="workspaceDiscussionList"></div>
+                    <form class="workspace-chat-form" id="workspaceChatForm">
+                      <input id="workspaceChatInput" type="text" placeholder="和其他开发者、Codex 一起讨论实现方案..." autocomplete="off" />
+                      <button type="submit">发送</button>
+                    </form>
+                  </section>
+                  <aside class="workspace-code-panel">
+                    <div class="workspace-participants-head"><span>Participants</span><strong>参与的开发者</strong></div>
+                    <div class="workspace-online-mini" id="workspaceOnlineMini"></div>
+                  </aside>
+                </div>
+              </section>
+              <aside class="room-side-panel">
+                <section><h3>房间信息</h3><div class="room-facts" id="roomFacts"></div></section>
+                <section><h3>在线开发者</h3><div class="workspace-online-mini" id="roomOnlineList"></div></section>
+              </aside>
+            </main>
+          </div>
+        </section>
+
+        <section class="developer-admin-view view-panel" id="developerAdminView">
+          <div class="developer-admin-shell">
+            <nav class="admin-subnav" aria-label="开发者管理中心二级页面">
+              <button class="active" type="button" data-admin-panel-target="adminOverviewPanel">概览</button>
+              <button type="button" data-admin-panel-target="adminApiPanel">接口</button>
+              <button type="button" data-admin-panel-target="adminPermissionPanel">权限</button>
+              <button type="button" data-admin-panel-target="adminChatPanel">实时群聊</button>
+            </nav>
+
+            <section class="admin-grid">
+              <article class="admin-panel admin-subpanel active" id="adminOverviewPanel">
+                <div class="admin-panel-head"><h3>管理中心概览</h3><span>Admin reserved</span></div>
+                <div class="admin-overview-grid">
+                  <div><strong>5</strong><span>核心接口预留</span></div>
+                  <div><strong>4</strong><span>权限模块待上线</span></div>
+                  <div><strong>1</strong><span>实时群聊通道</span></div>
+                  <div><strong>0</strong><span>已开放管理员</span></div>
+                </div>
+                <div class="admin-chart-grid" id="adminOverviewCharts"></div>
+                <div class="admin-overview-workbench">
+                  <section class="admin-status-card">
+                    <div class="admin-panel-head"><h3>实时状态</h3><span id="adminOverviewOnline">0 online</span></div>
+                    <div class="admin-online-list compact" id="adminOverviewOnlineList"></div>
+                  </section>
+                  <section class="admin-status-card">
+                    <div class="admin-panel-head"><h3>公网入口</h3><span id="adminPublicTunnelState">未启动</span></div>
+                    <div class="admin-public-entry" id="adminPublicEntry">
+                      <strong>等待公网入口</strong>
+                      <p>运行 start_public_tunnel.ps1 后，这里会显示可分享给朋友的公网地址。</p>
+                    </div>
+                  </section>
+                  <section class="admin-status-card">
+                    <div class="admin-panel-head"><h3>最近公开消息</h3><span id="adminPublicMessageCount">0</span></div>
+                    <div class="admin-overview-feed" id="adminOverviewFeed"></div>
+                  </section>
+                </div>
+              </article>
+
+              <article class="admin-panel admin-subpanel api-registry-panel" id="adminApiPanel">
+                <div class="admin-panel-head"><h3>接口 / API Registry</h3><span>真实接口</span></div>
+                <form class="admin-inline-form admin-control-card" id="adminApiForm">
+                  <div class="admin-form-copy"><strong>注册真实接口</strong><span>用于 Connector、Agent、权限中心调用</span></div>
+                  <select id="adminApiMethod"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option></select>
+                  <input id="adminApiPath" type="text" placeholder="/api/your-endpoint" />
+                  <input id="adminApiDesc" type="text" placeholder="接口说明" />
+                  <button type="submit">添加</button>
+                </form>
+                <div class="api-registry-list" id="adminApiList"></div>
+              </article>
+
+              <article class="admin-panel admin-subpanel" id="adminPermissionPanel">
+                <div class="admin-panel-head"><h3>权限 / 成员</h3><span>Admin gate</span></div>
+                <form class="admin-inline-form admin-control-card" id="adminMemberForm">
+                  <div class="admin-form-copy"><strong>添加协作者</strong><span>后续用于项目权限、接口权限和联机身份</span></div>
+                  <input id="adminMemberName" type="text" placeholder="成员名称" />
+                  <select id="adminMemberRole"><option>Developer</option><option>Admin</option><option>Reviewer</option><option>Guest</option></select>
+                  <input id="adminMemberProject" type="text" placeholder="项目范围，例如 QuantumFlow Core" />
+                  <div class="admin-permission-picker">
+                    <button type="button" data-admin-permission-toggle="war_room" aria-pressed="true">战情室</button>
+                    <button type="button" data-admin-permission-toggle="source_world" aria-pressed="true">开源世界</button>
+                    <button type="button" data-admin-permission-toggle="workspace" aria-pressed="true">项目房间</button>
+                    <button type="button" data-admin-permission-toggle="api_registry" aria-pressed="false">接口</button>
+                    <button type="button" data-admin-permission-toggle="member_admin" aria-pressed="false">成员管理</button>
+                  </div>
+                  <button type="submit">添加</button>
+                </form>
+                <div class="admin-permission-list" id="adminMemberList"></div>
+              </article>
+
+              <article class="admin-panel admin-subpanel admin-chat-panel" id="adminChatPanel">
+                <div class="admin-panel-head"><h3>开发者实时群聊</h3><span id="adminChatOnline">4 online</span></div>
+                <div class="admin-chat-shell">
+                  <section class="admin-chat-main">
+                    <div class="admin-chat-list" id="adminChatList"></div>
+                    <form class="admin-chat-form" id="adminChatForm">
+                      <input id="adminChatInput" type="text" placeholder="向开发者群发送消息..." autocomplete="off" />
+                      <button type="submit">发送</button>
+                    </form>
+                  </section>
+                  <aside class="admin-online-panel">
+                    <div class="admin-online-head"><div><span>Online Developers</span><h3>在线开发者</h3></div><strong id="adminOnlineTotal">0</strong></div>
+                    <div class="admin-online-list" id="adminOnlineList"></div>
+                  </aside>
+                </div>
+              </article>
+            </section>
+          </div>
+        </section>
+
+        <section class="floating-tool-window" id="repositoriesWindow" aria-hidden="true">
+          <div class="floating-tool-head"><div><span class="project-kicker">Repositories</span><h2>内部仓库</h2></div><button class="icon-button floating-close" data-close-window="repositoriesWindow" title="关闭">×</button></div>
+          <div class="floating-tool-body"><div class="repo-window-list" id="repoWindowList"></div></div>
+        </section>
+        <section class="floating-tool-window" id="issuesWindow" aria-hidden="true">
+          <div class="floating-tool-head"><div><span class="project-kicker">Issues</span><h2>内部任务 / Issues</h2></div><button class="icon-button floating-close" data-close-window="issuesWindow" title="关闭">×</button></div>
+          <div class="floating-tool-body"><div class="issue-window-list" id="issueWindowList"></div></div>
+        </section>
+        <section class="floating-tool-window" id="connectorsWindow" aria-hidden="true">
+          <div class="floating-tool-head"><div><span class="project-kicker">Connectors</span><h2>Connector 状态</h2></div><button class="icon-button floating-close" data-close-window="connectorsWindow" title="关闭">×</button></div>
+          <div class="floating-tool-body"><div class="connector-grid connector-window-grid"><div><strong>企业微信</strong><span>connected</span></div><div><strong>飞书</strong><span>challenge ok</span></div><div><strong>抖音</strong><span>planned</span></div><div><strong>微信客服</strong><span>planned</span></div></div></div>
+        </section>
+        <section class="floating-tool-window" id="governanceWindow" aria-hidden="true">
+          <div class="floating-tool-head"><div><span class="project-kicker">Governance</span><h2>队长投票 / 合并门禁</h2></div><button class="icon-button floating-close" data-close-window="governanceWindow" title="关闭">×</button></div>
+          <div class="floating-tool-body two-column"><section class="qf-panel captain-card"><div class="qf-panel-head"><h3>队长投票</h3><span>最高票负责整合</span></div><p>票数最高者负责整合代码、合并建议和管理 Agent 协作。</p><div class="captain-votes" id="captainVoteList"></div></section><section class="qf-panel"><div class="qf-panel-head"><h3>合并门禁</h3><span>必须通过</span></div><div class="gate-list"><div><b></b><span>建议投票最高</span></div><div><b></b><span>语法校验通过</span></div><div><b></b><span>Reviewer 无阻塞</span></div><div><b></b><span>结果可回传 App</span></div></div></section></div>
+        </section>
+        <section class="floating-tool-window" id="recordsWindow" aria-hidden="true">
+          <div class="floating-tool-head"><div><span class="project-kicker">Accepted Changes</span><h2>采纳记录</h2></div><button class="icon-button floating-close" data-close-window="recordsWindow" title="关闭">×</button></div>
+          <div class="floating-tool-body"><div class="patch-history-list" id="patchHistoryList"></div></div>
+        </section>
+        <section class="floating-tool-window" id="notificationWindow" aria-hidden="true">
+          <div class="floating-tool-head"><div><span class="project-kicker">Connectors</span><h2>通知队列 / 手动飞书</h2></div><button class="icon-button floating-close" data-close-window="notificationWindow" title="关闭">×</button></div>
+          <div class="floating-tool-body notification-body"><div class="qf-panel"><div class="qf-panel-head"><h3>飞书配置</h3><span id="connectorConfigState">未配置</span></div><form class="connector-config-form" id="connectorConfigForm"><input id="feishuWebhookInput" type="password" placeholder="粘贴飞书机器人 Webhook" /><button type="submit">保存</button></form><div class="connector-action-row"><button class="flush-outbox-button" id="testFeishuBtn" type="button">发送测试</button><button class="flush-outbox-button" id="flushOutboxBtn" type="button">发送队列</button></div><form class="manual-feishu-form" id="manualFeishuForm"><input id="manualFeishuInput" type="text" placeholder="输入要发到飞书群的消息" /><button type="submit">发送</button></form></div><div class="qf-panel"><div class="qf-panel-head"><h3>通知队列</h3><span>sent / failed / pending</span></div><div class="patch-history-list" id="outboxList"></div></div></div>
+        </section>
+        <section class="feishu-chat-window" id="feishuChatWindow" aria-hidden="true">
+          <div class="feishu-chat-head"><div><span class="project-kicker">Feishu Bot Conversation</span><h2>飞书机器人会话</h2></div><button class="icon-button" id="botChatClose" title="关闭">×</button></div>
+          <div class="feishu-chat-body"><div class="bot-chat-list" id="botChatList"></div><form class="bot-chat-form" id="botChatForm"><input id="botChatInput" type="text" placeholder="/issue 任务、/code 开发需求、/status、/help" /><button type="submit">发送</button></form></div>
+        </section>
+        <section class="coder-studio" id="coderStudio" aria-hidden="true">
+          <div class="studio-head"><div><span class="project-kicker" id="studioKicker">Agent Coding Studio</span><h2 id="studioTitle">可视化编程工作台</h2></div><button class="icon-button" id="studioClose" title="关闭">×</button></div>
+          <div class="studio-body"><div class="editor-panel"><div class="editor-tabs"><button class="active">agent_task.py</button><button>runtime_event.json</button><button>notes.md</button></div><div class="code-editor" id="studioCode"></div></div><aside class="explain-panel"><h3>旁白讲解</h3><div id="studioExplain"></div></aside></div>
+        </section>
+        <section class="bottom-panel">
+          <div class="panel-head"><span>事件流 · <b id="connectionState">local demo</b></span><span id="clock">00:00:00</span></div>
+          <div class="log" id="log"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js?v=20260603-codex-after-user"></script>
+  </body>
+</html>
+
