@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from cc_switch_config import load_codex_provider_config
+
 
 @dataclass(frozen=True)
 class ModelProfile:
@@ -13,20 +15,21 @@ class ModelProfile:
 
 
 MODEL_PROFILES = {
-    "master": ModelProfile("openai", "gpt-5.1-codex-mini", temperature=0.2),
-    "frontend": ModelProfile("openai", "gpt-5.1-codex-mini", temperature=0.35),
-    "backend": ModelProfile("openai", "gpt-5.1-codex-mini", temperature=0.25),
-    "reviewer": ModelProfile("openai", "gpt-5.1", temperature=0.1),
-    "tester": ModelProfile("openai", "gpt-5.1-mini", temperature=0.1),
+    "master": ModelProfile("openai", "gpt-5.5", temperature=0.2),
+    "frontend": ModelProfile("openai", "gpt-5.5", temperature=0.35),
+    "backend": ModelProfile("openai", "gpt-5.5", temperature=0.25),
+    "reviewer": ModelProfile("openai", "gpt-5.5", temperature=0.1),
+    "tester": ModelProfile("openai", "gpt-5.5", temperature=0.1),
 }
 
 
 def profile_for_agent(agent_id: str) -> ModelProfile:
-    base = MODEL_PROFILES.get(agent_id, ModelProfile("openai", "gpt-5.1-codex-mini"))
+    base = MODEL_PROFILES.get(agent_id, ModelProfile("openai", "gpt-5.5"))
+    cc_switch = load_codex_provider_config() if base.provider == "openai" else None
     prefix = agent_env_prefix(agent_id)
     return ModelProfile(
         provider=os.getenv(f"{prefix}_PROVIDER", base.provider),
-        model=os.getenv(f"{prefix}_MODEL", os.getenv("CODEX_MODEL", base.model)),
+        model=os.getenv(f"{prefix}_MODEL", os.getenv("CODEX_MODEL", cc_switch.model if cc_switch and cc_switch.model else base.model)),
         temperature=float(os.getenv(f"{prefix}_TEMPERATURE", base.temperature)),
         max_tokens=int(os.getenv(f"{prefix}_MAX_TOKENS", base.max_tokens)),
     )
@@ -48,8 +51,10 @@ def env_key_for_provider(provider: str) -> str:
 
 def has_provider_key(provider: str) -> bool:
     key_name = env_key_for_provider(provider)
-    if provider == "openai" and os.getenv("CODEX_API_KEY"):
-        return True
+    if provider == "openai":
+        cc_switch = load_codex_provider_config()
+        if os.getenv("CODEX_API_KEY") or (cc_switch and cc_switch.api_key):
+            return True
     return bool(key_name and os.getenv(key_name))
 
 
@@ -60,7 +65,8 @@ def resolve_provider_key(provider: str, agent_id: str | None = None) -> str | No
         if agent_key:
             return agent_key
     if provider == "openai":
-        return os.getenv("OPENAI_API_KEY") or os.getenv("CODEX_API_KEY")
+        cc_switch = load_codex_provider_config()
+        return os.getenv("OPENAI_API_KEY") or os.getenv("CODEX_API_KEY") or (cc_switch.api_key if cc_switch else None)
     key_name = env_key_for_provider(provider)
     return os.getenv(key_name) if key_name else None
 
@@ -72,5 +78,11 @@ def resolve_provider_base_url(provider: str, agent_id: str | None = None) -> str
         if agent_url:
             return agent_url
     if provider == "openai":
-        return os.getenv("CODEX_BASE_URL") or os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
+        cc_switch = load_codex_provider_config()
+        return (
+            os.getenv("CODEX_BASE_URL")
+            or os.getenv("OPENAI_BASE_URL")
+            or os.getenv("OPENAI_API_BASE")
+            or (cc_switch.base_url if cc_switch else None)
+        )
     return os.getenv(f"{provider.upper()}_BASE_URL")

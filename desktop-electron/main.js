@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -22,13 +22,13 @@ function writeDesktopConfig(config) {
 
 function clampZoom(value) {
   const next = Number(value);
-  if (!Number.isFinite(next)) return 0.9;
+  if (!Number.isFinite(next)) return 1;
   return Math.min(1.2, Math.max(0.6, Math.round(next * 100) / 100));
 }
 
 function getZoomFactor() {
   const config = readDesktopConfig();
-  return clampZoom(config.window?.zoomFactor ?? 0.9);
+  return clampZoom(config.window?.zoomFactor ?? 1);
 }
 
 function saveZoomFactor(value) {
@@ -105,7 +105,7 @@ function createWindow() {
     if (!isPlus && !isMinus && !isReset) return;
     event.preventDefault();
     const current = getZoomFactor();
-    const next = isReset ? 0.9 : current + (isPlus ? 0.05 : -0.05);
+    const next = isReset ? 1 : current + (isPlus ? 0.05 : -0.05);
     const factor = saveZoomFactor(next);
     win.webContents.setZoomFactor(factor);
     win.webContents.send("zoom:changed", factor);
@@ -136,6 +136,13 @@ ipcMain.handle("zoom:set", (event, value) => {
   const factor = saveZoomFactor(value);
   BrowserWindow.fromWebContents(event.sender)?.webContents.setZoomFactor(factor);
   return factor;
+});
+
+ipcMain.handle("browser:open-external", async (_event, url) => {
+  const target = String(url || "");
+  if (!/^https?:\/\/(127\.0\.0\.1|localhost|[\w.-]+)/i.test(target)) return false;
+  await shell.openExternal(target);
+  return true;
 });
 
 app.whenReady().then(async () => {

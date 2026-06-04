@@ -1,3 +1,72 @@
+/* User zoom is preserved; Open Source World fills the available desktop width. */
+body.open-source-mode.open-source-mode .app-shell,
+body.desktop-app.open-source-mode.open-source-mode .app-shell {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  width: 100vw !important;
+  max-width: none !important;
+  min-width: 0 !important;
+}
+
+body.open-source-mode.open-source-mode .main,
+body.desktop-app.open-source-mode.open-source-mode .main {
+  grid-column: 1 / -1 !important;
+  width: 100vw !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+body.open-source-mode.open-source-mode .open-source-world-view.active,
+body.desktop-app.open-source-mode.open-source-mode .open-source-world-view.active {
+  width: 100% !important;
+  max-width: none !important;
+  height: calc(100vh - 76px) !important;
+  margin: 0 !important;
+  padding: 8px 8px 10px !important;
+  overflow: hidden !important;
+}
+
+body.desktop-app.open-source-mode.open-source-mode .open-source-world-view.active {
+  height: calc(100vh - var(--desktop-chrome-height) - 76px) !important;
+}
+
+body.open-source-mode.open-source-mode .osw-shell,
+body.desktop-app.open-source-mode.open-source-mode .osw-shell {
+  width: 100% !important;
+  max-width: none !important;
+  height: 100% !important;
+  margin: 0 !important;
+  display: grid !important;
+  grid-template-columns: clamp(260px, 15vw, 300px) minmax(0, 1fr) clamp(320px, 26vw, 520px) !important;
+  gap: 12px !important;
+}
+
+body.open-source-mode.open-source-mode .osw-main,
+body.desktop-app.open-source-mode.open-source-mode .osw-main,
+body.open-source-mode.open-source-mode .osw-chat,
+body.desktop-app.open-source-mode.open-source-mode .osw-chat,
+body.open-source-mode.open-source-mode .osw-sidebar,
+body.desktop-app.open-source-mode.open-source-mode .osw-sidebar {
+  min-width: 0 !important;
+  height: 100% !important;
+}
+
+body.open-source-mode.open-source-mode .osw-grid,
+body.desktop-app.open-source-mode.open-source-mode .osw-grid {
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr) !important;
+}
+
+body.open-source-mode.open-source-mode .osw-top,
+body.desktop-app.open-source-mode.open-source-mode .osw-top,
+body.open-source-mode.open-source-mode .osw-compose,
+body.desktop-app.open-source-mode.open-source-mode .osw-compose,
+body.open-source-mode.open-source-mode .osw-grid,
+body.desktop-app.open-source-mode.open-source-mode .osw-grid {
+  width: 100% !important;
+  max-width: none !important;
+}
+
 :root {
   --bg: #0d1020;
   --panel: #151829;
@@ -749,6 +818,8 @@ body.admin-mode .agent-strip {
 .agent-layer {
   position: absolute;
   inset: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .agent {
@@ -759,6 +830,10 @@ body.admin-mode .agent-strip {
   transition: transform 900ms cubic-bezier(0.2, 0.8, 0.2, 1);
   filter: drop-shadow(8px 12px 6px rgba(0, 0, 0, 0.25));
   zoom: 1.16;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
 }
 
 .agent.walking .leg-left,
@@ -1237,13 +1312,41 @@ body.admin-mode .agent-strip {
 .person-item i {
   width: 28px;
   height: 28px;
+  display: grid;
+  place-items: center;
   border-radius: 999px;
   box-shadow: 0 0 12px rgba(33, 214, 231, 0.18);
+  color: #07101d;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
 }
 
 .person-item strong,
 .person-item em {
   display: block;
+}
+
+.person-item {
+  position: relative;
+}
+
+.person-item b {
+  margin-left: auto;
+  color: #2fe098;
+  font-size: 11px;
+}
+
+.person-item.is-offline {
+  opacity: 0.62;
+}
+
+.person-item.is-offline b {
+  color: #ff8b96;
+}
+
+.person-item.is-pending b {
+  color: #ffd88a;
 }
 
 .person-item em {
@@ -3846,6 +3949,106 @@ body.platform-mode .qf-code .patch-preview-panel {
   gap: 16px;
 }
 
+.llm-plugin-panel {
+  display: none;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid #2a3150;
+  border-right: 1px solid #2a3150;
+  background: #0f1528;
+  color: #edf3ff;
+  padding: 12px;
+  overflow: auto;
+}
+
+.llm-plugin-panel.active {
+  display: grid;
+  grid-template-rows: auto auto minmax(90px, 0.55fr) auto minmax(110px, 1fr);
+  gap: 10px;
+}
+
+.llm-plugin-head,
+.llm-plugin-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.llm-plugin-head span,
+.llm-plugin-grid span {
+  display: block;
+  color: #21d6e7;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.llm-plugin-head strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 15px;
+}
+
+.llm-plugin-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.llm-plugin-grid label {
+  display: grid;
+  gap: 5px;
+}
+
+.llm-plugin-grid input,
+.llm-plugin-grid select,
+.llm-plugin-panel textarea {
+  min-width: 0;
+  border: 1px solid #344063;
+  background: #0b1020;
+  color: #edf3ff;
+  border-radius: 7px;
+  padding: 9px;
+  font: inherit;
+}
+
+.llm-plugin-panel textarea {
+  resize: none;
+  line-height: 1.5;
+}
+
+.llm-plugin-head button,
+.llm-plugin-actions button {
+  min-height: 34px;
+  border: 1px solid rgba(33, 214, 231, 0.62);
+  background: rgba(33, 214, 231, 0.14);
+  color: #dffcff;
+  border-radius: 7px;
+  padding: 0 10px;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.llm-plugin-actions {
+  align-items: stretch;
+}
+
+.llm-plugin-actions button {
+  flex: 1;
+}
+
+.llm-plugin-output {
+  min-height: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  border: 1px solid #253052;
+  background: #0b1020;
+  color: #bdefff;
+  border-radius: 8px;
+  padding: 10px;
+  line-height: 1.55;
+  font-size: 12px;
+}
+
 .auto-code-brand {
   display: flex;
   align-items: center;
@@ -4199,7 +4402,7 @@ body.platform-mode .floating-tool-window {
 
 .issue-create-form textarea {
   min-height: 88px;
-  resize: vertical;
+  resize: none;
   padding: 11px 12px;
   line-height: 1.55;
 }
@@ -7884,6 +8087,46 @@ body.open-source-mode .osw-compose textarea {
 :where(textarea) {
   padding: 10px 12px;
   line-height: 1.55;
+  resize: none;
+  scrollbar-color: rgba(126, 231, 255, 0.45) rgba(16, 23, 43, 0.82);
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+
+:where(textarea)::-webkit-scrollbar,
+.floating-tool-body::-webkit-scrollbar,
+.issue-window-list::-webkit-scrollbar,
+.issue-strip::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+:where(textarea)::-webkit-scrollbar-track,
+.floating-tool-body::-webkit-scrollbar-track,
+.issue-window-list::-webkit-scrollbar-track,
+.issue-strip::-webkit-scrollbar-track {
+  background: rgba(16, 23, 43, 0.7);
+  border-radius: 999px;
+}
+
+:where(textarea)::-webkit-scrollbar-thumb,
+.floating-tool-body::-webkit-scrollbar-thumb,
+.issue-window-list::-webkit-scrollbar-thumb,
+.issue-strip::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(16, 23, 43, 0.78);
+  background: rgba(126, 231, 255, 0.48);
+  border-radius: 999px;
+}
+
+:where(textarea)::-webkit-scrollbar-thumb:hover,
+.floating-tool-body::-webkit-scrollbar-thumb:hover,
+.issue-window-list::-webkit-scrollbar-thumb:hover,
+.issue-strip::-webkit-scrollbar-thumb:hover {
+  background: rgba(146, 255, 215, 0.72);
+}
+
+:where(textarea)::-webkit-resizer {
+  display: none;
 }
 
 :where(input, textarea)::placeholder {
@@ -9045,5 +9288,4203 @@ body.desktop-app .admin-overview-feed::-webkit-scrollbar,
 body.desktop-app .admin-online-list::-webkit-scrollbar,
 body.desktop-app .osw-chat-list::-webkit-scrollbar,
 body.desktop-app .project-room-chat-list::-webkit-scrollbar {
+  display: none !important;
+}
+
+.admin-user-lookup {
+  display: grid;
+  grid-template-columns: minmax(120px, 150px) minmax(220px, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.admin-user-lookup span {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  border: 1px solid #2d375e;
+  background: rgba(13, 16, 32, 0.68);
+  color: #9fb2df;
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-user-lookup span[data-tone="ok"] {
+  border-color: rgba(47, 224, 152, 0.55);
+  color: #2fe098;
+}
+
+.admin-user-lookup span[data-tone="pending"] {
+  border-color: rgba(33, 214, 231, 0.55);
+  color: #7ee7ff;
+}
+
+.admin-user-lookup span[data-tone="warn"] {
+  border-color: rgba(255, 81, 95, 0.58);
+  color: #ff8b96;
+}
+
+#adminMemberName[readonly] {
+  color: #edf3ff;
+  background: rgba(16, 22, 41, 0.96);
+}
+
+#adminMemberUserId::-webkit-outer-spin-button,
+#adminMemberUserId::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+#adminMemberUserId {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.project-delivery-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.project-delivery-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(47, 224, 152, 0.42);
+  background: rgba(12, 24, 36, 0.92);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.project-delivery-card strong,
+.project-delivery-card span,
+.project-delivery-card em {
+  display: block;
+  min-width: 0;
+}
+
+.project-delivery-card strong {
+  color: #edf3ff;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.project-delivery-card span {
+  color: #8ddcc9;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.project-delivery-card em {
+  color: #7f91bf;
+  font-size: 10px;
+  font-style: normal;
+  margin-top: 4px;
+}
+
+.project-delivery-actions {
+  display: grid;
+  gap: 8px;
+  justify-items: stretch;
+}
+
+.project-delivery-card small {
+  display: block;
+  color: #b7c8ee;
+  font-size: 10px;
+  line-height: 1.45;
+  margin-top: 6px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-delivery-card a,
+.delivery-test-button,
+.delivery-open-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #21d6e7;
+  border-radius: 8px;
+  color: #dffcff;
+  background: rgba(16, 151, 167, 0.38);
+  font-size: 12px;
+  font-weight: 900;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.delivery-test-button {
+  cursor: pointer;
+  background: rgba(18, 25, 48, 0.92);
+  color: #bdefff;
+}
+
+.delivery-test-button.testing {
+  border-color: rgba(255, 196, 77, 0.75);
+  color: #ffd88a;
+}
+
+.delivery-test-button.passed {
+  border-color: rgba(47, 224, 152, 0.8);
+  color: #2fe098;
+}
+
+.delivery-test-button.failed {
+  border-color: rgba(255, 81, 95, 0.8);
+  color: #ff8b96;
+}
+
+.sidebar .project-delivery-list {
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.sidebar .project-delivery-card {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 9px;
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.sidebar .project-delivery-card strong {
+  display: -webkit-box;
+  min-width: 0;
+  max-height: 38px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.sidebar .project-delivery-card span {
+  display: -webkit-box;
+  max-height: 50px;
+  overflow: hidden;
+  color: #95e9cf;
+  font-size: 11px;
+  line-height: 1.45;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.sidebar .project-delivery-card em,
+.sidebar .project-delivery-card small {
+  max-height: 28px;
+  overflow: hidden;
+  color: #7f91bf;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.sidebar .project-delivery-actions {
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.sidebar .project-delivery-card a,
+.sidebar .delivery-test-button,
+.sidebar .delivery-open-button {
+  width: 100%;
+  min-height: 30px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 11px;
+}
+
+.admin-online-person.is-online b,
+.osw-online-person.is-online b {
+  color: #2fe098;
+}
+
+.admin-online-person.is-offline,
+.osw-online-person.is-offline {
+  opacity: 0.62;
+}
+
+.admin-online-person.is-offline b,
+.osw-online-person.is-offline b {
+  color: #ff8b96;
+}
+
+.admin-online-person.is-pending b,
+.osw-online-person.is-pending b {
+  color: #ffd88a;
+}
+
+/* Runtime environment view */
+body.runtime-environment-mode {
+  overflow: hidden;
+}
+
+body.runtime-environment-mode .app-shell {
+  grid-template-columns: 1fr;
+}
+
+body.runtime-environment-mode .sidebar,
+body.runtime-environment-mode .agent-strip,
+body.runtime-environment-mode #pauseBtn,
+body.runtime-environment-mode #nextBtn {
+  display: none !important;
+}
+
+body.runtime-environment-mode .main {
+  grid-template-rows: 92px minmax(0, 1fr);
+}
+
+body.runtime-environment-mode .workspace,
+body.runtime-environment-mode .community-view,
+body.runtime-environment-mode .open-source-world-view,
+body.runtime-environment-mode .developer-admin-view,
+body.runtime-environment-mode .profile-view,
+body.runtime-environment-mode .project-room-view {
+  display: none !important;
+}
+
+.runtime-environment-view.active {
+  grid-row: 2;
+  display: block;
+  min-height: 0;
+  overflow: auto;
+  background:
+    linear-gradient(90deg, rgba(33, 214, 231, 0.08), transparent 36%),
+    radial-gradient(circle at 78% 18%, rgba(47, 224, 152, 0.14), transparent 28%),
+    #0b1020;
+}
+
+.runtime-env-shell {
+  display: grid;
+  gap: 16px;
+  min-height: 100%;
+  padding: 18px;
+}
+
+.runtime-env-hero,
+.runtime-env-grid,
+.runtime-metrics {
+  width: min(1280px, 100%);
+  margin: 0 auto;
+}
+
+.runtime-env-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  align-items: center;
+  gap: 18px;
+  min-height: 132px;
+  border: 1px solid rgba(56, 68, 112, 0.86);
+  background: rgba(13, 18, 35, 0.82);
+  border-radius: 10px;
+  padding: 18px 20px;
+}
+
+.runtime-env-hero span,
+.runtime-env-panel-head span,
+.runtime-metrics span,
+.runtime-node span {
+  display: block;
+  color: #8fa6d8;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.runtime-env-hero h2 {
+  margin: 6px 0;
+  font-size: clamp(28px, 4vw, 46px);
+  line-height: 1;
+}
+
+.runtime-env-hero p {
+  max-width: 760px;
+  margin: 0;
+  color: #aab7d6;
+  line-height: 1.7;
+}
+
+.runtime-env-health {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  border: 1px solid rgba(47, 224, 152, 0.48);
+  background:
+    radial-gradient(circle, rgba(47, 224, 152, 0.22), transparent 62%),
+    #10172b;
+  border-radius: 10px;
+}
+
+.runtime-env-health strong {
+  color: #92ffd7;
+  font-size: 38px;
+  line-height: 1;
+}
+
+.runtime-env-health span {
+  color: #8ddcc9;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.runtime-env-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+}
+
+.runtime-env-map,
+.runtime-env-panel,
+.runtime-metrics article {
+  border: 1px solid rgba(42, 49, 80, 0.92);
+  background: rgba(13, 18, 35, 0.86);
+  border-radius: 10px;
+}
+
+.runtime-env-map {
+  position: relative;
+  min-height: 470px;
+  overflow: hidden;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    #0b1020;
+  background-size: 34px 34px;
+}
+
+.runtime-node {
+  position: absolute;
+  z-index: 2;
+  width: 190px;
+  min-height: 112px;
+  border: 1px solid rgba(33, 214, 231, 0.42);
+  background: rgba(16, 23, 43, 0.94);
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.24);
+}
+
+.runtime-node strong,
+.runtime-node em {
+  display: block;
+}
+
+.runtime-node strong {
+  margin-top: 8px;
+  color: #edf3ff;
+  font-size: 15px;
+}
+
+.runtime-node em {
+  margin-top: 7px;
+  color: #8f9bb8;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.45;
+}
+
+.desktop-node {
+  left: 8%;
+  top: 42%;
+}
+
+.api-node {
+  left: 41%;
+  top: 38%;
+  border-color: rgba(47, 224, 152, 0.58);
+}
+
+.data-node {
+  right: 8%;
+  top: 14%;
+}
+
+.agent-node {
+  right: 9%;
+  bottom: 12%;
+}
+
+.connector-node {
+  left: 19%;
+  top: 10%;
+}
+
+.runtime-link {
+  position: absolute;
+  z-index: 1;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(33, 214, 231, 0.08), rgba(33, 214, 231, 0.75), rgba(47, 224, 152, 0.18));
+  transform-origin: left center;
+}
+
+.link-desktop-api {
+  left: 26%;
+  top: 52%;
+  width: 18%;
+}
+
+.link-api-data {
+  left: 55%;
+  top: 39%;
+  width: 23%;
+  transform: rotate(-27deg);
+}
+
+.link-api-agent {
+  left: 55%;
+  top: 58%;
+  width: 24%;
+  transform: rotate(24deg);
+}
+
+.link-api-connector {
+  left: 34%;
+  top: 37%;
+  width: 18%;
+  transform: rotate(28deg);
+}
+
+.runtime-pulse {
+  position: absolute;
+  left: 50%;
+  top: 49%;
+  width: 140px;
+  height: 140px;
+  border: 1px solid rgba(47, 224, 152, 0.35);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  animation: runtimePulse 2.8s ease-out infinite;
+}
+
+@keyframes runtimePulse {
+  0% {
+    opacity: 0.9;
+    transform: translate(-50%, -50%) scale(0.45);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.45);
+  }
+}
+
+.runtime-env-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 470px;
+  padding: 16px;
+}
+
+.runtime-env-panel-head strong {
+  display: block;
+  margin-top: 6px;
+  color: #edf3ff;
+  font-size: 22px;
+}
+
+.runtime-service-list {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.runtime-service-list div {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 0.82fr) minmax(0, 1.18fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  border: 1px solid rgba(52, 64, 99, 0.8);
+  background: #10172b;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.runtime-service-list b {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #7f8bad;
+}
+
+.runtime-service-list b.ok {
+  background: #2fe098;
+  box-shadow: 0 0 18px rgba(47, 224, 152, 0.48);
+}
+
+.runtime-service-list b.warn {
+  background: #ffc44d;
+  box-shadow: 0 0 18px rgba(255, 196, 77, 0.38);
+}
+
+.runtime-service-list b.idle {
+  background: #21d6e7;
+  box-shadow: 0 0 18px rgba(33, 214, 231, 0.36);
+}
+
+.runtime-service-list strong {
+  color: #edf3ff;
+  font-size: 13px;
+}
+
+.runtime-service-list span {
+  color: #8f9bb8;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.runtime-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.runtime-metrics article {
+  padding: 16px;
+}
+
+.runtime-metrics strong,
+.runtime-metrics em {
+  display: block;
+}
+
+.runtime-metrics strong {
+  margin-top: 6px;
+  color: #edf3ff;
+  font-size: 28px;
+}
+
+.runtime-metrics em {
+  margin-top: 3px;
+  color: #8f9bb8;
+  font-size: 12px;
+  font-style: normal;
+}
+
+body.desktop-app.runtime-environment-mode .main {
+  grid-template-rows: 64px minmax(720px, max-content) !important;
+}
+
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  min-height: max-content !important;
+  padding-bottom: 36px !important;
+}
+
+@media (max-width: 1180px) {
+  .runtime-env-hero,
+  .runtime-env-grid,
+  .runtime-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-env-health {
+    width: 160px;
+  }
+
+  .runtime-env-map {
+    min-height: 620px;
+  }
+
+  .desktop-node,
+  .api-node,
+  .data-node,
+  .agent-node,
+  .connector-node {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+  }
+
+  .connector-node {
+    top: 4%;
+  }
+
+  .desktop-node {
+    top: 22%;
+  }
+
+  .api-node {
+    top: 41%;
+  }
+
+  .data-node {
+    top: 60%;
+  }
+
+  .agent-node {
+    top: 79%;
+    bottom: auto;
+  }
+
+  .runtime-link,
+  .runtime-pulse {
+    display: none;
+  }
+}
+
+/* Dark command-center scrollbars */
+body:not(.platform-mode):not(.open-source-mode):not(.admin-mode):not(.profile-mode):not(.project-room-mode) .main,
+body:not(.platform-mode):not(.open-source-mode):not(.admin-mode):not(.profile-mode):not(.project-room-mode) .sidebar,
+body:not(.platform-mode):not(.open-source-mode):not(.admin-mode):not(.profile-mode):not(.project-room-mode) .room-wrap,
+body.runtime-environment-mode .main,
+body.runtime-environment-mode .runtime-environment-view,
+body.desktop-app .main,
+body.desktop-app .sidebar,
+body.desktop-app .room-wrap {
+  scrollbar-color: rgba(126, 231, 255, 0.42) rgba(9, 13, 27, 0.92) !important;
+  scrollbar-width: thin !important;
+}
+
+body:not(.platform-mode):not(.open-source-mode):not(.admin-mode):not(.profile-mode):not(.project-room-mode) .main::-webkit-scrollbar,
+body:not(.platform-mode):not(.open-source-mode):not(.admin-mode):not(.profile-mode):not(.project-room-mode) .sidebar::-webkit-scrollbar,
+body:not(.platform-mode):not(.open-source-mode):not(.admin-mode):not(.profile-mode):not(.project-room-mode) .room-wrap::-webkit-scrollbar,
+body.runtime-environment-mode .main::-webkit-scrollbar,
+body.runtime-environment-mode .runtime-environment-view::-webkit-scrollbar,
+body.desktop-app .main::-webkit-scrollbar,
+body.desktop-app .sidebar::-webkit-scrollbar,
+body.desktop-app .room-wrap::-webkit-scrollbar {
+  display: block !important;
+  width: 8px !important;
+  height: 8px !important;
+}
+
+body:not(.platform-mode):not(.open-source-mode):not(.admin-mode):not(.profile-mode):not(.project-room-mode) .main::-webkit-scrollbar-button,
+body:not(.platform-mode):not(.open-source-mode):not(.admin-mode):not(.profile-mode):not(.project-room-mode) .sidebar::-webkit-scrollbar-button,
+body:not(.platform-mode):not(.open-source-mode):not(.admin-mode):not(.profile-mode):not(.project-room-mode) .room-wrap::-webkit-scrollbar-button,
+body.runtime-environment-mode .main::-webkit-scrollbar-button,
+body.runtime-environment-mode .runtime-environment-view::-webkit-scrollbar-button,
+body.desktop-app .main::-webkit-scrollbar-button,
+body.desktop-app .sidebar::-webkit-scrollbar-button,
+body.desktop-app .room-wrap::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+body:not(.platform-mode):not(.open-source-mode):not(.admin-mode):not(.profile-mode):not(.project-room-mode) .main::-webkit-scrollbar-track,
+body:not(.platform-mode):not(.open-source-mode):not(.admin-mode):not(.profile-mode):not(.project-room-mode) .sidebar::-webkit-scrollbar-track,
+body:not(.platform-mode):not(.open-source-mode):not(.admin-mode):not(.profile-mode):not(.project-room-mode) .room-wrap::-webkit-scrollbar-track,
+body.runtime-environment-mode .main::-webkit-scrollbar-track,
+body.runtime-environment-mode .runtime-environment-view::-webkit-scrollbar-track,
+body.desktop-app .main::-webkit-scrollbar-track,
+body.desktop-app .sidebar::-webkit-scrollbar-track,
+body.desktop-app .room-wrap::-webkit-scrollbar-track {
+  background: rgba(9, 13, 27, 0.92) !important;
+}
+
+body:not(.platform-mode):not(.open-source-mode):not(.admin-mode):not(.profile-mode):not(.project-room-mode) .main::-webkit-scrollbar-thumb,
+body:not(.platform-mode):not(.open-source-mode):not(.admin-mode):not(.profile-mode):not(.project-room-mode) .sidebar::-webkit-scrollbar-thumb,
+body:not(.platform-mode):not(.open-source-mode):not(.admin-mode):not(.profile-mode):not(.project-room-mode) .room-wrap::-webkit-scrollbar-thumb,
+body.runtime-environment-mode .main::-webkit-scrollbar-thumb,
+body.runtime-environment-mode .runtime-environment-view::-webkit-scrollbar-thumb,
+body.desktop-app .main::-webkit-scrollbar-thumb,
+body.desktop-app .sidebar::-webkit-scrollbar-thumb,
+body.desktop-app .room-wrap::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(9, 13, 27, 0.92) !important;
+  background: rgba(126, 231, 255, 0.48) !important;
+  border-radius: 999px !important;
+}
+
+/* Runtime environment final layout guard */
+body.runtime-environment-mode,
+body.desktop-app.runtime-environment-mode {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden !important;
+  background: #0b1020;
+}
+
+body.runtime-environment-mode .app-shell,
+body.desktop-app.runtime-environment-mode .app-shell {
+  width: 100vw !important;
+  height: 100vh !important;
+  min-width: 0 !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+body.runtime-environment-mode .main,
+body.desktop-app.runtime-environment-mode .main {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 100vh !important;
+  min-height: 0 !important;
+  grid-template-rows: 64px minmax(0, 1fr) !important;
+  overflow: hidden !important;
+}
+
+body.desktop-app.runtime-environment-mode .app-shell {
+  height: calc(100vh - var(--desktop-chrome-height)) !important;
+  margin-top: var(--desktop-chrome-height) !important;
+}
+
+body.desktop-app.runtime-environment-mode .main {
+  height: calc(100vh - var(--desktop-chrome-height)) !important;
+  max-height: calc(100vh - var(--desktop-chrome-height)) !important;
+}
+
+body.runtime-environment-mode .topbar,
+body.desktop-app.runtime-environment-mode .topbar {
+  min-width: 0 !important;
+}
+
+body.runtime-environment-mode .runtime-environment-view.active,
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  display: block !important;
+  width: 100% !important;
+  max-width: none !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  grid-row: 2 !important;
+  overflow: auto !important;
+  padding: 0 !important;
+}
+
+body.runtime-environment-mode .runtime-env-shell,
+body.desktop-app.runtime-environment-mode .runtime-env-shell {
+  width: 100% !important;
+  max-width: none !important;
+  min-height: 100% !important;
+  align-content: start;
+  gap: 18px;
+  padding: 18px 22px 22px !important;
+}
+
+body.runtime-environment-mode .runtime-env-hero,
+body.runtime-environment-mode .runtime-env-grid,
+body.runtime-environment-mode .runtime-metrics,
+body.desktop-app.runtime-environment-mode .runtime-env-hero,
+body.desktop-app.runtime-environment-mode .runtime-env-grid,
+body.desktop-app.runtime-environment-mode .runtime-metrics {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+}
+
+body.runtime-environment-mode .runtime-env-grid,
+body.desktop-app.runtime-environment-mode .runtime-env-grid {
+  grid-template-columns: minmax(620px, 1.45fr) minmax(360px, 0.55fr) !important;
+  align-items: stretch;
+}
+
+body.runtime-environment-mode .runtime-env-map,
+body.runtime-environment-mode .runtime-env-panel,
+body.desktop-app.runtime-environment-mode .runtime-env-map,
+body.desktop-app.runtime-environment-mode .runtime-env-panel {
+  min-height: clamp(500px, 58vh, 680px) !important;
+}
+
+body.runtime-environment-mode .runtime-env-map,
+body.desktop-app.runtime-environment-mode .runtime-env-map {
+  height: clamp(500px, 58vh, 680px);
+}
+
+body.runtime-environment-mode .runtime-node,
+body.desktop-app.runtime-environment-mode .runtime-node {
+  width: clamp(176px, 13vw, 220px);
+  min-height: 112px;
+}
+
+body.runtime-environment-mode .desktop-node,
+body.desktop-app.runtime-environment-mode .desktop-node {
+  left: 5.5%;
+  top: 47%;
+}
+
+body.runtime-environment-mode .api-node,
+body.desktop-app.runtime-environment-mode .api-node {
+  left: 41%;
+  top: 44%;
+}
+
+body.runtime-environment-mode .data-node,
+body.desktop-app.runtime-environment-mode .data-node {
+  right: 6%;
+  top: 12%;
+}
+
+body.runtime-environment-mode .agent-node,
+body.desktop-app.runtime-environment-mode .agent-node {
+  right: 6%;
+  bottom: 10%;
+}
+
+body.runtime-environment-mode .connector-node,
+body.desktop-app.runtime-environment-mode .connector-node {
+  left: 20%;
+  top: 12%;
+}
+
+body.runtime-environment-mode .runtime-metrics,
+body.desktop-app.runtime-environment-mode .runtime-metrics {
+  grid-template-columns: repeat(4, minmax(180px, 1fr)) !important;
+}
+
+@media (max-width: 1120px) {
+  body.runtime-environment-mode .runtime-env-grid,
+  body.desktop-app.runtime-environment-mode .runtime-env-grid,
+  body.runtime-environment-mode .runtime-metrics,
+  body.desktop-app.runtime-environment-mode .runtime-metrics {
+    grid-template-columns: 1fr !important;
+  }
+
+  body.runtime-environment-mode .runtime-env-map,
+  body.desktop-app.runtime-environment-mode .runtime-env-map {
+    min-height: 720px !important;
+    height: 720px;
+  }
+}
+
+/* Source Civilization code page final spacing pass */
+body.desktop-app.platform-mode {
+  overflow: hidden !important;
+}
+
+body.desktop-app.platform-mode .main {
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+body.desktop-app.platform-mode .community-view.active {
+  width: 100% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+body.desktop-app.platform-mode .open-world {
+  width: 100% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+body.desktop-app.platform-mode .qf-main {
+  width: 100% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+body.desktop-app.platform-mode .qf-code {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) clamp(300px, 22vw, 380px) !important;
+  grid-template-rows: 90px minmax(0, 1fr) !important;
+  overflow: hidden !important;
+}
+
+body.desktop-app.platform-mode .qf-code .code-browser-head {
+  grid-column: 1 / -1 !important;
+  min-height: 90px !important;
+  padding: 18px 20px !important;
+}
+
+body.desktop-app.platform-mode .qf-code .code-layout {
+  grid-column: 1 !important;
+  grid-row: 2 !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  display: grid !important;
+  grid-template-columns: clamp(170px, 12vw, 220px) minmax(0, 1fr) !important;
+  overflow: hidden !important;
+}
+
+body.desktop-app.platform-mode .qf-code .file-tree {
+  min-width: 0 !important;
+  padding: 16px 14px !important;
+  overflow: auto !important;
+  scrollbar-width: none !important;
+}
+
+body.desktop-app.platform-mode .qf-code .file-tree::-webkit-scrollbar {
+  display: none !important;
+}
+
+body.desktop-app.platform-mode .qf-code .file-viewer {
+  position: relative !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  display: grid !important;
+  grid-template-rows: 48px minmax(0, 1fr) !important;
+  overflow: hidden !important;
+}
+
+body.desktop-app.platform-mode .qf-code .file-viewer-head {
+  min-width: 0 !important;
+  padding: 0 18px !important;
+}
+
+body.desktop-app.platform-mode .qf-code #repoCodeView,
+body.desktop-app.platform-mode .qf-code .manual-code-editor {
+  grid-row: 2 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: auto !important;
+  font-size: 16px !important;
+  line-height: 1.62 !important;
+}
+
+body.desktop-app.platform-mode .qf-code #repoCodeView {
+  padding: 18px 24px !important;
+}
+
+body.desktop-app.platform-mode .auto-code-panel.active {
+  grid-row: 2 !important;
+  position: absolute !important;
+  left: clamp(14px, 2vw, 28px) !important;
+  right: clamp(14px, 2vw, 28px) !important;
+  top: clamp(54px, 7vh, 78px) !important;
+  bottom: clamp(14px, 2vh, 24px) !important;
+  width: auto !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  max-height: none !important;
+  z-index: 10 !important;
+  padding: clamp(14px, 1.5vw, 22px) !important;
+  gap: 12px !important;
+  display: grid !important;
+  grid-template-rows: 48px auto auto auto minmax(50px, auto) minmax(86px, auto) !important;
+  overflow: auto !important;
+  scrollbar-width: none !important;
+  border: 1px solid rgba(126, 231, 255, 0.34) !important;
+  background: rgba(13, 18, 35, 0.97) !important;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32) !important;
+}
+
+body.desktop-app.platform-mode .auto-code-panel.active::-webkit-scrollbar {
+  display: none !important;
+}
+
+body.desktop-app.platform-mode .auto-code-brand {
+  min-height: 48px !important;
+  padding: 0 14px !important;
+}
+
+body.desktop-app.platform-mode .auto-code-hero {
+  min-height: 112px !important;
+  padding: 18px !important;
+  grid-template-columns: 72px minmax(0, 1fr) !important;
+  align-items: center !important;
+}
+
+body.desktop-app.platform-mode .auto-code-icon {
+  width: 58px !important;
+  height: 58px !important;
+  font-size: 13px !important;
+}
+
+body.desktop-app.platform-mode .auto-code-hero h3 {
+  font-size: clamp(22px, 2vw, 30px) !important;
+  line-height: 1.18 !important;
+}
+
+body.desktop-app.platform-mode .auto-code-hero p {
+  margin-top: 8px !important;
+  font-size: 14px !important;
+}
+
+body.desktop-app.platform-mode .auto-code-points,
+body.desktop-app.platform-mode .auto-agent-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+}
+
+body.desktop-app.platform-mode .auto-agent-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+body.desktop-app.platform-mode .auto-agent-grid button {
+  min-height: 92px !important;
+}
+
+body.desktop-app.platform-mode .auto-code-form {
+  grid-template-columns: minmax(0, 1fr) 140px 170px !important;
+  gap: 12px !important;
+}
+
+body.desktop-app.platform-mode .auto-code-form textarea {
+  height: 96px !important;
+  font-size: 15px !important;
+}
+
+body.desktop-app.platform-mode .auto-code-form button,
+body.desktop-app.platform-mode .auto-code-form select {
+  min-height: 96px !important;
+}
+
+body.desktop-app.platform-mode .code-review-comments {
+  grid-column: 2 !important;
+  grid-row: 2 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  display: grid !important;
+  grid-template-rows: auto auto minmax(0, 1fr) auto !important;
+  overflow: hidden !important;
+}
+
+body.desktop-app.platform-mode .review-panel-head {
+  padding: 16px 16px 12px !important;
+}
+
+body.desktop-app.platform-mode .patch-preview-panel {
+  max-height: 88px !important;
+  margin: 0 14px 10px !important;
+  overflow: hidden !important;
+}
+
+body.desktop-app.platform-mode .code-review-comments .live-comments {
+  min-height: 0 !important;
+  overflow: auto !important;
+  padding: 0 14px 12px !important;
+  scrollbar-width: none !important;
+}
+
+body.desktop-app.platform-mode .code-review-comments .comment-form {
+  grid-template-columns: 74px minmax(0, 1fr) 82px !important;
+  gap: 10px !important;
+  padding: 12px 14px 14px !important;
+}
+
+body.desktop-app.platform-mode .code-review-comments .comment-form select,
+body.desktop-app.platform-mode .code-review-comments .comment-form input,
+body.desktop-app.platform-mode .code-review-comments .comment-form button {
+  height: 44px !important;
+  font-size: 14px !important;
+}
+
+body.desktop-app.platform-mode .qf-code,
+body.desktop-app.platform-mode .qf-code * {
+  max-width: 100%;
+}
+
+body.desktop-app.platform-mode .qf-code {
+  scrollbar-width: none !important;
+}
+
+body.desktop-app.platform-mode .qf-code::-webkit-scrollbar {
+  display: none !important;
+}
+
+body.desktop-app .room-toolbar span::after {
+  content: " 自动适配";
+}
+.qf-final-runtime-side-console-sentinel {
+  display: contents;
+}
+
+/* Final product-name, runtime fullscreen, and side-console pass. */
+body.runtime-environment-mode .app-shell,
+body.desktop-app.runtime-environment-mode .app-shell {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  width: 100vw !important;
+  max-width: none !important;
+  min-width: 0 !important;
+}
+
+body.runtime-environment-mode .sidebar,
+body.desktop-app.runtime-environment-mode .sidebar,
+body.runtime-environment-mode .agent-strip,
+body.desktop-app.runtime-environment-mode .agent-strip {
+  display: none !important;
+}
+
+body.runtime-environment-mode .main,
+body.desktop-app.runtime-environment-mode .main {
+  grid-column: 1 / -1 !important;
+  width: 100vw !important;
+  max-width: none !important;
+  min-width: 0 !important;
+}
+
+body.runtime-environment-mode .topbar,
+body.desktop-app.runtime-environment-mode .topbar {
+  width: 100% !important;
+  max-width: none !important;
+  padding: 0 28px !important;
+}
+
+body.runtime-environment-mode .runtime-environment-view.active,
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  width: 100vw !important;
+  max-width: none !important;
+  margin: 0 !important;
+}
+
+body.platform-mode .qf-code,
+body.desktop-app.platform-mode .qf-code {
+  grid-template-columns: minmax(0, 1fr) clamp(240px, 17vw, 300px) clamp(300px, 21vw, 360px) !important;
+  grid-template-rows: 72px minmax(0, 1fr) !important;
+}
+
+body.platform-mode .qf-code .code-layout,
+body.desktop-app.platform-mode .qf-code .code-layout {
+  grid-column: 1 !important;
+  grid-row: 2 !important;
+}
+
+body.platform-mode .auto-code-panel.active,
+body.desktop-app.platform-mode .auto-code-panel.active {
+  position: static !important;
+  inset: auto !important;
+  grid-column: 2 !important;
+  grid-row: 2 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  padding: 12px !important;
+  gap: 10px !important;
+  display: grid !important;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto auto !important;
+  align-content: start !important;
+  overflow: auto !important;
+  border-left: 1px solid #2a3150 !important;
+  border-right: 1px solid #2a3150 !important;
+  border-top: 0 !important;
+  border-bottom: 0 !important;
+  border-radius: 0 !important;
+  background: #0f1528 !important;
+  box-shadow: none !important;
+  scrollbar-width: none !important;
+}
+
+body.platform-mode .llm-plugin-panel.active,
+body.desktop-app.platform-mode .llm-plugin-panel.active {
+  grid-column: 2 !important;
+  grid-row: 2 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  display: grid !important;
+  border-top: 0 !important;
+  border-bottom: 0 !important;
+  border-radius: 0 !important;
+  scrollbar-width: none !important;
+}
+
+body.platform-mode .llm-plugin-panel.active::-webkit-scrollbar,
+body.desktop-app.platform-mode .llm-plugin-panel.active::-webkit-scrollbar {
+  display: none !important;
+}
+
+body.platform-mode .auto-code-panel.active::-webkit-scrollbar,
+body.desktop-app.platform-mode .auto-code-panel.active::-webkit-scrollbar {
+  display: none !important;
+}
+
+body.platform-mode .auto-code-brand,
+body.desktop-app.platform-mode .auto-code-brand {
+  min-height: 34px !important;
+  padding: 0 !important;
+}
+
+body.platform-mode .auto-code-brand strong,
+body.desktop-app.platform-mode .auto-code-brand strong {
+  font-size: 14px !important;
+}
+
+body.platform-mode .auto-code-brand button,
+body.desktop-app.platform-mode .auto-code-brand button {
+  width: 28px !important;
+  height: 28px !important;
+  border: 1px solid #344063 !important;
+  background: #10172b !important;
+  border-radius: 6px !important;
+  font-size: 20px !important;
+}
+
+body.platform-mode .auto-code-hero,
+body.desktop-app.platform-mode .auto-code-hero {
+  min-height: 0 !important;
+  padding: 10px !important;
+  display: grid !important;
+  grid-template-columns: 44px minmax(0, 1fr) !important;
+  gap: 10px !important;
+  align-items: center !important;
+  border: 1px solid #253052 !important;
+  background: #0b1020 !important;
+}
+
+body.platform-mode .auto-code-icon,
+body.desktop-app.platform-mode .auto-code-icon {
+  width: 40px !important;
+  height: 40px !important;
+  margin: 0 !important;
+  border-width: 1px !important;
+  font-size: 10px !important;
+}
+
+body.platform-mode .auto-code-hero h3,
+body.desktop-app.platform-mode .auto-code-hero h3 {
+  font-size: 15px !important;
+  line-height: 1.25 !important;
+}
+
+body.platform-mode .auto-code-hero p,
+body.desktop-app.platform-mode .auto-code-hero p {
+  display: none !important;
+}
+
+body.platform-mode .auto-code-points,
+body.desktop-app.platform-mode .auto-code-points {
+  grid-template-columns: 1fr !important;
+  gap: 6px !important;
+}
+
+body.platform-mode .auto-code-points span,
+body.desktop-app.platform-mode .auto-code-points span {
+  min-height: 28px !important;
+  padding: 7px 8px 7px 22px !important;
+  border: 1px solid #253052 !important;
+  background: #0b1020 !important;
+  font-size: 11px !important;
+  line-height: 1.3 !important;
+}
+
+body.platform-mode .auto-code-points span::before,
+body.desktop-app.platform-mode .auto-code-points span::before {
+  left: 8px !important;
+  top: 11px !important;
+  width: 6px !important;
+  height: 6px !important;
+  border: 0 !important;
+  border-radius: 50% !important;
+  background: #2fe098 !important;
+}
+
+body.platform-mode .auto-agent-grid,
+body.desktop-app.platform-mode .auto-agent-grid {
+  grid-template-columns: 1fr !important;
+  gap: 7px !important;
+}
+
+body.platform-mode .auto-agent-grid button,
+body.desktop-app.platform-mode .auto-agent-grid button {
+  min-height: 52px !important;
+  padding: 9px 9px 9px 48px !important;
+  border-radius: 7px !important;
+}
+
+body.platform-mode .auto-agent-grid i,
+body.desktop-app.platform-mode .auto-agent-grid i {
+  left: 10px !important;
+  top: 11px !important;
+  width: 30px !important;
+  height: 30px !important;
+  border-radius: 7px !important;
+  font-size: 10px !important;
+}
+
+body.platform-mode .auto-agent-grid strong,
+body.desktop-app.platform-mode .auto-agent-grid strong {
+  font-size: 12px !important;
+}
+
+body.platform-mode .auto-agent-grid span,
+body.desktop-app.platform-mode .auto-agent-grid span {
+  margin-top: 3px !important;
+  font-size: 10px !important;
+}
+
+body.platform-mode .agent-arbitration-note,
+body.desktop-app.platform-mode .agent-arbitration-note {
+  padding: 9px !important;
+  font-size: 11px !important;
+  line-height: 1.45 !important;
+}
+
+body.platform-mode .auto-code-form,
+body.desktop-app.platform-mode .auto-code-form {
+  grid-template-columns: 1fr !important;
+  gap: 8px !important;
+  align-self: end !important;
+}
+
+body.platform-mode .auto-code-form textarea,
+body.desktop-app.platform-mode .auto-code-form textarea {
+  height: 70px !important;
+  padding: 9px !important;
+  font-size: 12px !important;
+}
+
+body.platform-mode .auto-code-form button,
+body.desktop-app.platform-mode .auto-code-form button,
+body.platform-mode .auto-code-form select,
+body.desktop-app.platform-mode .auto-code-form select {
+  min-height: 38px !important;
+  height: 38px !important;
+  font-size: 13px !important;
+}
+
+body.platform-mode .code-review-comments,
+body.desktop-app.platform-mode .code-review-comments {
+  grid-column: 3 !important;
+  grid-row: 2 !important;
+}
+
+/* Desktop source-page nav guard: keep the commandbar below the custom window chrome. */
+body.desktop-app.platform-mode .qf-main {
+  display: grid !important;
+  grid-template-rows: max-content minmax(0, 1fr) !important;
+  gap: 10px !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  padding: 12px 0 0 !important;
+  overflow: hidden !important;
+}
+
+body.desktop-app.platform-mode .open-world-commandbar {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 30 !important;
+  min-height: 58px !important;
+  max-height: 112px !important;
+  flex-shrink: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  box-shadow: 0 10px 26px rgba(5, 8, 18, 0.24) !important;
+}
+
+body.desktop-app.platform-mode .open-world-actions {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  gap: 8px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  padding: 1px 0 6px !important;
+  scrollbar-width: thin !important;
+}
+
+body.desktop-app.platform-mode .open-world-actions button {
+  flex: 0 0 auto !important;
+  min-width: max-content !important;
+  height: 34px !important;
+  white-space: nowrap !important;
+}
+
+body.desktop-app.platform-mode .qf-main > .open-world-content-panel.active,
+body.desktop-app.platform-mode .qf-code {
+  grid-row: 2 !important;
+  min-height: 0 !important;
+  height: 100% !important;
+}
+
+/* Restore platform as part of the main app shell instead of an isolated editor page. */
+body.desktop-app.platform-mode .main {
+  display: grid !important;
+  grid-template-rows: 76px minmax(0, 1fr) !important;
+  height: calc(100vh - var(--desktop-chrome-height)) !important;
+  max-height: calc(100vh - var(--desktop-chrome-height)) !important;
+  overflow: hidden !important;
+}
+
+body.desktop-app.platform-mode .topbar {
+  grid-row: 1 !important;
+  display: flex !important;
+  min-height: 76px !important;
+  height: 76px !important;
+  padding: 0 20px !important;
+  position: relative !important;
+  z-index: 80 !important;
+  flex-shrink: 0 !important;
+}
+
+body.desktop-app.platform-mode .top-actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  padding-bottom: 4px !important;
+  scrollbar-width: thin !important;
+}
+
+body.desktop-app.platform-mode .top-actions .tab-button,
+body.desktop-app.platform-mode .top-actions .user-chip,
+body.desktop-app.platform-mode .top-actions .icon-button,
+body.desktop-app.platform-mode .top-actions .primary-button {
+  flex: 0 0 auto !important;
+}
+
+body.desktop-app.platform-mode .community-view.active {
+  grid-row: 2 !important;
+  display: grid !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  padding: 10px 12px 12px !important;
+  overflow: hidden !important;
+}
+
+body.desktop-app.platform-mode .open-world,
+body.desktop-app.platform-mode .qf-world {
+  display: grid !important;
+  grid-template-columns: clamp(220px, 15vw, 292px) minmax(0, 1fr) clamp(240px, 17vw, 330px) !important;
+  gap: 12px !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+body.desktop-app.platform-mode .qf-rail,
+body.desktop-app.platform-mode .qf-governance {
+  display: grid !important;
+  align-content: start !important;
+  gap: 12px !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow: auto !important;
+}
+
+body.desktop-app.platform-mode .qf-main {
+  display: grid !important;
+  grid-template-rows: max-content minmax(0, 1fr) !important;
+  gap: 10px !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+body.desktop-app.platform-mode .open-world-commandbar {
+  position: relative !important;
+  top: auto !important;
+  z-index: 30 !important;
+  min-height: 58px !important;
+  margin: 0 !important;
+}
+
+body.desktop-app.platform-mode .qf-code {
+  grid-row: 2 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  grid-template-columns: minmax(0, 1fr) clamp(280px, 22vw, 360px) !important;
+}
+
+/* Final source-code workbench geometry: editor | auto agent | review. */
+body.platform-mode .qf-code.open-world-content-panel.active,
+body.desktop-app.platform-mode .qf-code.open-world-content-panel.active {
+  display: grid !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  grid-template-columns: minmax(0, 1fr) clamp(250px, 16vw, 310px) clamp(300px, 20vw, 360px) !important;
+  grid-template-rows: 72px minmax(0, 1fr) !important;
+  overflow: hidden !important;
+}
+
+body.platform-mode .qf-code .code-browser-head,
+body.desktop-app.platform-mode .qf-code .code-browser-head {
+  grid-column: 1 / -1 !important;
+  grid-row: 1 !important;
+}
+
+body.platform-mode .qf-code .code-layout,
+body.desktop-app.platform-mode .qf-code .code-layout {
+  grid-column: 1 !important;
+  grid-row: 2 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  display: grid !important;
+  grid-template-columns: clamp(150px, 10vw, 190px) minmax(0, 1fr) !important;
+  overflow: hidden !important;
+}
+
+body.platform-mode .auto-code-panel.active,
+body.desktop-app.platform-mode .auto-code-panel.active {
+  position: static !important;
+  inset: auto !important;
+  grid-column: 2 !important;
+  grid-row: 2 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 12px !important;
+  display: grid !important;
+  grid-template-rows: 34px auto auto minmax(0, 1fr) auto auto !important;
+  gap: 9px !important;
+  overflow: auto !important;
+  border: 0 !important;
+  border-left: 1px solid #2a3150 !important;
+  border-right: 1px solid #2a3150 !important;
+  border-radius: 0 !important;
+  background: #0f1528 !important;
+  box-shadow: none !important;
+  scrollbar-width: none !important;
+}
+
+body.platform-mode .auto-code-panel.active::-webkit-scrollbar,
+body.desktop-app.platform-mode .auto-code-panel.active::-webkit-scrollbar {
+  display: none !important;
+}
+
+body.platform-mode .auto-code-hero,
+body.desktop-app.platform-mode .auto-code-hero {
+  min-height: 0 !important;
+  padding: 10px !important;
+  grid-template-columns: 42px minmax(0, 1fr) !important;
+}
+
+body.platform-mode .auto-code-icon,
+body.desktop-app.platform-mode .auto-code-icon {
+  width: 38px !important;
+  height: 38px !important;
+  font-size: 10px !important;
+}
+
+body.platform-mode .auto-code-hero h3,
+body.desktop-app.platform-mode .auto-code-hero h3 {
+  font-size: 15px !important;
+  line-height: 1.25 !important;
+}
+
+body.platform-mode .auto-code-hero p,
+body.desktop-app.platform-mode .auto-code-hero p {
+  display: none !important;
+}
+
+body.platform-mode .auto-code-points,
+body.desktop-app.platform-mode .auto-code-points,
+body.platform-mode .auto-agent-grid,
+body.desktop-app.platform-mode .auto-agent-grid,
+body.platform-mode .auto-code-form,
+body.desktop-app.platform-mode .auto-code-form {
+  grid-template-columns: 1fr !important;
+}
+
+body.platform-mode .auto-agent-grid button,
+body.desktop-app.platform-mode .auto-agent-grid button {
+  min-height: 50px !important;
+}
+
+body.platform-mode .auto-code-form textarea,
+body.desktop-app.platform-mode .auto-code-form textarea {
+  height: 68px !important;
+}
+
+body.platform-mode .auto-code-form select,
+body.desktop-app.platform-mode .auto-code-form select,
+body.platform-mode .auto-code-form button,
+body.desktop-app.platform-mode .auto-code-form button {
+  min-height: 38px !important;
+  height: 38px !important;
+}
+
+body.platform-mode .code-review-comments,
+body.desktop-app.platform-mode .code-review-comments {
+  grid-column: 3 !important;
+  grid-row: 2 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+/* Final source page horizontal fill: keep the left rail fixed and stretch everything to the right edge. */
+body.desktop-app.platform-mode .community-view.active {
+  width: 100% !important;
+  max-width: none !important;
+  padding-right: 12px !important;
+}
+
+body.desktop-app.platform-mode .open-world,
+body.desktop-app.platform-mode .qf-world {
+  grid-template-columns: 272px minmax(0, 1fr) !important;
+  width: 100% !important;
+  max-width: none !important;
+  justify-content: stretch !important;
+  align-items: stretch !important;
+}
+
+body.desktop-app.platform-mode .qf-rail {
+  grid-column: 1 !important;
+  width: 272px !important;
+  min-width: 272px !important;
+  max-width: 272px !important;
+}
+
+body.desktop-app.platform-mode .qf-governance {
+  display: none !important;
+}
+
+body.desktop-app.platform-mode .qf-main {
+  grid-column: 2 !important;
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+}
+
+body.desktop-app.platform-mode .open-world-commandbar,
+body.desktop-app.platform-mode .qf-main > .open-world-content-panel.active,
+body.desktop-app.platform-mode .qf-code.open-world-content-panel.active {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+body.platform-mode .qf-code.open-world-content-panel.active,
+body.desktop-app.platform-mode .qf-code.open-world-content-panel.active,
+body.platform-mode .qf-code,
+body.desktop-app.platform-mode .qf-code {
+  grid-template-columns: minmax(0, 1.8fr) minmax(260px, 0.52fr) minmax(300px, 0.62fr) !important;
+}
+
+body.desktop-app.platform-mode .qf-code .code-layout {
+  grid-template-columns: 172px minmax(0, 1fr) !important;
+}
+
+/* Manual coding LLM plugin final placement. */
+body.manual-coding-mode.platform-mode .auto-code-panel,
+body.desktop-app.manual-coding-mode.platform-mode .auto-code-panel {
+  display: none !important;
+}
+
+body.manual-coding-mode.platform-mode .llm-plugin-panel.active,
+body.desktop-app.manual-coding-mode.platform-mode .llm-plugin-panel.active {
+  display: grid !important;
+  grid-column: 2 !important;
+  grid-row: 2 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  overflow: auto !important;
+}
+
+body.platform-mode:not(.manual-coding-mode) .llm-plugin-panel,
+body.desktop-app.platform-mode:not(.manual-coding-mode) .llm-plugin-panel {
+  display: none !important;
+}
+
+/* Runtime environment hard fill: keep the page independent from old workbench layers. */
+body.runtime-environment-mode .app-shell,
+body.desktop-app.runtime-environment-mode .app-shell {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  overflow: hidden !important;
+}
+
+body.desktop-app.runtime-environment-mode .app-shell {
+  height: calc(100vh - var(--desktop-chrome-height)) !important;
+  margin-top: var(--desktop-chrome-height) !important;
+}
+
+body.runtime-environment-mode .sidebar,
+body.desktop-app.runtime-environment-mode .sidebar,
+body.runtime-environment-mode .agent-strip,
+body.desktop-app.runtime-environment-mode .agent-strip,
+body.runtime-environment-mode .bottom-panel,
+body.desktop-app.runtime-environment-mode .bottom-panel,
+body.runtime-environment-mode .coder-studio,
+body.desktop-app.runtime-environment-mode .coder-studio,
+body.runtime-environment-mode .feishu-chat-window,
+body.desktop-app.runtime-environment-mode .feishu-chat-window {
+  display: none !important;
+}
+
+body.runtime-environment-mode .main,
+body.desktop-app.runtime-environment-mode .main {
+  display: grid !important;
+  grid-template-rows: 76px minmax(0, 1fr) !important;
+  width: 100vw !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 100vh !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  background: #0b1020 !important;
+}
+
+body.desktop-app.runtime-environment-mode .main {
+  height: calc(100vh - var(--desktop-chrome-height)) !important;
+  max-height: calc(100vh - var(--desktop-chrome-height)) !important;
+}
+
+body.runtime-environment-mode .topbar,
+body.desktop-app.runtime-environment-mode .topbar {
+  grid-row: 1 !important;
+  width: 100% !important;
+  height: 76px !important;
+  min-height: 76px !important;
+  padding: 0 28px !important;
+  overflow: hidden !important;
+  position: relative !important;
+  z-index: 40 !important;
+}
+
+body.runtime-environment-mode .runtime-environment-view.active,
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  grid-row: 2 !important;
+  display: block !important;
+  position: relative !important;
+  z-index: 20 !important;
+  width: 100% !important;
+  max-width: none !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: auto !important;
+  background:
+    linear-gradient(90deg, rgba(33, 214, 231, 0.08), transparent 36%),
+    radial-gradient(circle at 78% 18%, rgba(47, 224, 152, 0.14), transparent 28%),
+    #0b1020 !important;
+}
+
+body.runtime-environment-mode .runtime-env-shell,
+body.desktop-app.runtime-environment-mode .runtime-env-shell {
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr) auto !important;
+  align-content: stretch !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  min-height: 100% !important;
+  gap: 18px !important;
+  padding: 26px 32px 28px !important;
+}
+
+body.runtime-environment-mode .runtime-env-hero,
+body.runtime-environment-mode .runtime-env-grid,
+body.runtime-environment-mode .runtime-metrics,
+body.desktop-app.runtime-environment-mode .runtime-env-hero,
+body.desktop-app.runtime-environment-mode .runtime-env-grid,
+body.desktop-app.runtime-environment-mode .runtime-metrics {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+}
+
+body.runtime-environment-mode .runtime-env-hero,
+body.desktop-app.runtime-environment-mode .runtime-env-hero {
+  min-height: 150px !important;
+  grid-template-columns: minmax(0, 1fr) clamp(210px, 16vw, 280px) !important;
+  overflow: visible !important;
+}
+
+body.runtime-environment-mode .runtime-env-grid,
+body.desktop-app.runtime-environment-mode .runtime-env-grid {
+  display: grid !important;
+  grid-template-columns: minmax(680px, 1fr) clamp(330px, 23vw, 430px) !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  gap: 18px !important;
+}
+
+body.runtime-environment-mode .runtime-env-map,
+body.runtime-environment-mode .runtime-env-panel,
+body.desktop-app.runtime-environment-mode .runtime-env-map,
+body.desktop-app.runtime-environment-mode .runtime-env-panel {
+  min-height: clamp(430px, 52vh, 620px) !important;
+  height: 100% !important;
+}
+
+body.runtime-environment-mode .runtime-metrics,
+body.desktop-app.runtime-environment-mode .runtime-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+body.runtime-environment-mode .runtime-node,
+body.desktop-app.runtime-environment-mode .runtime-node,
+body.runtime-environment-mode .runtime-env-panel,
+body.desktop-app.runtime-environment-mode .runtime-env-panel,
+body.runtime-environment-mode .runtime-metrics article,
+body.desktop-app.runtime-environment-mode .runtime-metrics article {
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* Runtime board: independent layout, isolated from legacy runtime-env rules. */
+body.runtime-environment-mode.auth-mode .app-shell,
+body.desktop-app.runtime-environment-mode.auth-mode .app-shell {
+  filter: none !important;
+  pointer-events: auto !important;
+}
+
+body.runtime-environment-mode .auth-shell,
+body.desktop-app.runtime-environment-mode .auth-shell,
+body.runtime-environment-mode .floating-tool-window,
+body.desktop-app.runtime-environment-mode .floating-tool-window,
+body.runtime-environment-mode .agent-quick-panel,
+body.desktop-app.runtime-environment-mode .agent-quick-panel,
+body.runtime-environment-mode .feishu-chat-window,
+body.desktop-app.runtime-environment-mode .feishu-chat-window,
+body.runtime-environment-mode .coder-studio,
+body.desktop-app.runtime-environment-mode .coder-studio,
+body.runtime-environment-mode .bottom-panel,
+body.desktop-app.runtime-environment-mode .bottom-panel {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+body.runtime-environment-mode .runtime-environment-view.active,
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  display: block !important;
+  isolation: isolate !important;
+  position: relative !important;
+  z-index: 120 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow: auto !important;
+  background:
+    linear-gradient(90deg, rgba(33, 214, 231, 0.08), transparent 36%),
+    radial-gradient(circle at 82% 18%, rgba(47, 224, 152, 0.14), transparent 30%),
+    #0b1020 !important;
+}
+
+.runtime-board {
+  position: relative;
+  z-index: 121;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 18px;
+  width: 100%;
+  min-height: 100%;
+  padding: 24px 28px 28px;
+  background: transparent;
+}
+
+.runtime-board,
+.runtime-board * {
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+.runtime-board-hero,
+.runtime-board-map,
+.runtime-board-services,
+.runtime-board-metrics article {
+  border: 1px solid rgba(56, 68, 112, 0.86);
+  border-radius: 10px;
+  background: rgba(13, 18, 35, 0.88);
+}
+
+.runtime-board-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 18px;
+  align-items: center;
+  min-height: 132px;
+  padding: 18px 20px;
+}
+
+.runtime-board-hero span,
+.runtime-board-head span,
+.runtime-board-map span,
+.runtime-board-metrics span {
+  display: block;
+  color: #8fa6d8;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.runtime-board-hero h2 {
+  margin: 6px 0;
+  color: #edf3ff;
+  font-size: clamp(30px, 3.2vw, 48px);
+  line-height: 1;
+}
+
+.runtime-board-hero p {
+  margin: 0;
+  max-width: 840px;
+  color: #aab7d6;
+  line-height: 1.55;
+}
+
+.runtime-board-score {
+  display: grid;
+  place-items: center;
+  min-height: 96px;
+  border: 1px solid rgba(47, 224, 152, 0.58);
+  border-radius: 10px;
+  background: rgba(47, 224, 152, 0.08);
+}
+
+.runtime-board-score strong {
+  color: #2fe098;
+  font-size: 38px;
+}
+
+.runtime-board-score span {
+  color: #8ddcc9;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.runtime-board-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 23vw, 430px);
+  gap: 18px;
+  min-height: 0;
+}
+
+.runtime-board-map {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(140px, 1fr));
+  gap: 14px;
+  align-content: stretch;
+  min-height: 320px;
+  padding: 18px;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    #0b1020;
+  background-size: 34px 34px;
+}
+
+.runtime-board-map article {
+  display: grid;
+  align-content: center;
+  min-height: 180px;
+  padding: 18px;
+  border: 1px solid rgba(33, 214, 231, 0.44);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(33, 214, 231, 0.08), rgba(13, 18, 35, 0.96)),
+    #10172b;
+}
+
+.runtime-board-map strong {
+  display: block;
+  margin-top: 10px;
+  color: #edf3ff;
+  font-size: 18px;
+}
+
+.runtime-board-map em {
+  display: block;
+  margin-top: 8px;
+  color: #8f9bb8;
+  font-size: 13px;
+  font-style: normal;
+}
+
+.runtime-board-services {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 320px;
+  padding: 16px;
+}
+
+.runtime-board-head strong {
+  display: block;
+  margin-top: 6px;
+  color: #edf3ff;
+  font-size: 22px;
+}
+
+.runtime-board-service {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 0.8fr) minmax(0, 1.2fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 10px;
+  border: 1px solid rgba(52, 64, 99, 0.8);
+  border-radius: 8px;
+  background: #10172b;
+}
+
+.runtime-board-service b {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #21d6e7;
+}
+
+.runtime-board-service.ok b {
+  background: #2fe098;
+  box-shadow: 0 0 18px rgba(47, 224, 152, 0.48);
+}
+
+.runtime-board-service.warn b {
+  background: #ffc44d;
+  box-shadow: 0 0 18px rgba(255, 196, 77, 0.38);
+}
+
+.runtime-board-service.idle b {
+  background: #21d6e7;
+  box-shadow: 0 0 18px rgba(33, 214, 231, 0.36);
+}
+
+.runtime-board-service strong {
+  color: #edf3ff;
+  font-size: 13px;
+}
+
+.runtime-board-service span {
+  color: #8f9bb8;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.runtime-board-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.runtime-board-metrics article {
+  padding: 16px;
+}
+
+.runtime-board-metrics strong {
+  display: block;
+  margin-top: 6px;
+  color: #edf3ff;
+  font-size: 28px;
+}
+
+.runtime-board-metrics em {
+  display: block;
+  margin-top: 3px;
+  color: #8f9bb8;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.runtime-project-panel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid rgba(56, 68, 112, 0.86);
+  border-radius: 10px;
+  background: rgba(13, 18, 35, 0.9);
+}
+
+.runtime-project-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.34fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.runtime-project-copy {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 118px;
+  padding: 16px;
+  border: 1px solid rgba(33, 214, 231, 0.32);
+  border-radius: 8px;
+  background: #10172b;
+}
+
+.runtime-project-copy span {
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(47, 224, 152, 0.12);
+  color: #8ddcc9;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.runtime-project-copy h3 {
+  margin: 0;
+  color: #edf3ff;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.runtime-project-copy p {
+  margin: 0;
+  white-space: pre-wrap;
+  color: #aab7d6;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.runtime-project-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.runtime-project-actions button {
+  min-height: 42px;
+  border: 1px solid rgba(33, 214, 231, 0.38);
+  border-radius: 8px;
+  background: rgba(33, 214, 231, 0.12);
+  color: #dff8ff;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.runtime-project-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52 !important;
+}
+
+.runtime-project-actions button:nth-child(2) {
+  border-color: rgba(47, 224, 152, 0.42);
+  background: rgba(47, 224, 152, 0.13);
+  color: #dfffee;
+}
+
+.runtime-project-actions button:nth-child(3) {
+  border-color: rgba(255, 196, 77, 0.42);
+  background: rgba(255, 196, 77, 0.12);
+  color: #fff0c9;
+}
+
+.project-delivery-card.active {
+  border-color: rgba(47, 224, 152, 0.68);
+  box-shadow: inset 0 0 0 1px rgba(47, 224, 152, 0.18);
+}
+
+@media (max-width: 1280px) {
+  .runtime-board-main,
+  .runtime-board-metrics,
+  .runtime-project-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-board-map {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Final runtime isolation: pin the runtime board below the top navigation. */
+body.runtime-environment-mode .runtime-environment-view.active,
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  position: fixed !important;
+  left: 0 !important;
+  right: 0 !important;
+  top: 76px !important;
+  bottom: 0 !important;
+  z-index: 9990 !important;
+  height: auto !important;
+  min-height: 0 !important;
+  overflow: auto !important;
+}
+
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  top: calc(var(--desktop-chrome-height) + 76px) !important;
+}
+
+body.runtime-environment-mode .runtime-board,
+body.desktop-app.runtime-environment-mode .runtime-board {
+  min-height: 100% !important;
+  height: auto !important;
+  padding: 24px 28px 28px !important;
+  background:
+    linear-gradient(90deg, rgba(33, 214, 231, 0.08), transparent 36%),
+    radial-gradient(circle at 82% 18%, rgba(47, 224, 152, 0.14), transparent 30%),
+    #0b1020 !important;
+}
+
+/* LLM plugin final placement: editor | model plugin | review. */
+body.platform-mode .code-review-comments,
+body.desktop-app.platform-mode .code-review-comments {
+  grid-template-rows: auto auto minmax(0, 1fr) auto !important;
+}
+
+body.manual-coding-mode.platform-mode .qf-code.open-world-content-panel.active,
+body.desktop-app.manual-coding-mode.platform-mode .qf-code.open-world-content-panel.active,
+body.manual-coding-mode.platform-mode .qf-code,
+body.desktop-app.manual-coding-mode.platform-mode .qf-code {
+  grid-template-columns: minmax(520px, 1.18fr) minmax(360px, 0.78fr) minmax(300px, 0.54fr) !important;
+  grid-template-rows: auto minmax(0, 1fr) !important;
+  column-gap: 0 !important;
+}
+
+body.manual-coding-mode.platform-mode .qf-code > .llm-plugin-panel.active,
+body.desktop-app.manual-coding-mode.platform-mode .qf-code > .llm-plugin-panel.active {
+  grid-column: 2 !important;
+  grid-row: 2 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  display: grid !important;
+  grid-template-rows: auto auto minmax(120px, 0.42fr) auto minmax(160px, 1fr) !important;
+  gap: 12px !important;
+  margin: 0 !important;
+  padding: 16px !important;
+  overflow: auto !important;
+  border-left: 1px solid rgba(42, 49, 80, 0.96) !important;
+  border-right: 1px solid rgba(42, 49, 80, 0.96) !important;
+  border-top: 0 !important;
+  border-bottom: 0 !important;
+  border-radius: 0 !important;
+  background:
+    linear-gradient(180deg, rgba(33, 214, 231, 0.06), rgba(15, 21, 40, 0.96)),
+    #0f1528 !important;
+}
+
+body.platform-mode:not(.manual-coding-mode) .qf-code > .llm-plugin-panel,
+body.desktop-app.platform-mode:not(.manual-coding-mode) .qf-code > .llm-plugin-panel {
+  display: none !important;
+}
+
+body.manual-coding-mode.platform-mode .qf-code > .code-review-comments,
+body.desktop-app.manual-coding-mode.platform-mode .qf-code > .code-review-comments,
+body.platform-mode .qf-code > .code-review-comments,
+body.desktop-app.platform-mode .qf-code > .code-review-comments {
+  grid-column: 3 !important;
+  grid-row: 2 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+body.manual-coding-mode.platform-mode .qf-code > .llm-plugin-panel .llm-plugin-grid,
+body.desktop-app.manual-coding-mode.platform-mode .qf-code > .llm-plugin-panel .llm-plugin-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+body.manual-coding-mode.platform-mode .qf-code > .llm-plugin-panel .llm-plugin-output,
+body.desktop-app.manual-coding-mode.platform-mode .qf-code > .llm-plugin-panel .llm-plugin-output {
+  max-height: none !important;
+  font-size: 13px !important;
+  line-height: 1.6 !important;
+}
+
+body.manual-coding-mode.platform-mode .qf-code > .llm-plugin-panel::-webkit-scrollbar,
+body.desktop-app.manual-coding-mode.platform-mode .qf-code > .llm-plugin-panel::-webkit-scrollbar {
+  display: none !important;
+}
+
+/* Runtime matrix fallback: no blank canvas, every service card is visible. */
+body.runtime-environment-mode .runtime-env-shell,
+body.desktop-app.runtime-environment-mode .runtime-env-shell {
+  grid-template-rows: auto auto auto !important;
+  align-content: start !important;
+  min-height: auto !important;
+}
+
+body.runtime-environment-mode .runtime-env-grid,
+body.desktop-app.runtime-environment-mode .runtime-env-grid {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 23vw, 420px) !important;
+  align-items: stretch !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+body.runtime-environment-mode .runtime-env-map,
+body.desktop-app.runtime-environment-mode .runtime-env-map {
+  display: grid !important;
+  grid-template-columns: repeat(5, minmax(150px, 1fr)) !important;
+  align-content: stretch !important;
+  gap: 14px !important;
+  height: auto !important;
+  min-height: 260px !important;
+  padding: 18px !important;
+  overflow: visible !important;
+}
+
+body.runtime-environment-mode .runtime-node,
+body.desktop-app.runtime-environment-mode .runtime-node {
+  position: static !important;
+  transform: none !important;
+  inset: auto !important;
+  left: auto !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 172px !important;
+  display: grid !important;
+  align-content: center !important;
+  justify-items: start !important;
+  border-color: rgba(33, 214, 231, 0.44) !important;
+  background:
+    linear-gradient(180deg, rgba(33, 214, 231, 0.08), rgba(13, 18, 35, 0.96)),
+    #10172b !important;
+}
+
+body.runtime-environment-mode .runtime-node strong,
+body.desktop-app.runtime-environment-mode .runtime-node strong {
+  font-size: clamp(16px, 1.2vw, 20px) !important;
+}
+
+body.runtime-environment-mode .runtime-node em,
+body.desktop-app.runtime-environment-mode .runtime-node em {
+  font-size: 13px !important;
+}
+
+body.runtime-environment-mode .runtime-link,
+body.desktop-app.runtime-environment-mode .runtime-link,
+body.runtime-environment-mode .runtime-pulse,
+body.desktop-app.runtime-environment-mode .runtime-pulse {
+  display: none !important;
+}
+
+body.runtime-environment-mode .runtime-env-panel,
+body.desktop-app.runtime-environment-mode .runtime-env-panel {
+  height: auto !important;
+  min-height: 260px !important;
+  overflow: visible !important;
+}
+
+body.runtime-environment-mode .runtime-service-list,
+body.desktop-app.runtime-environment-mode .runtime-service-list {
+  grid-template-columns: 1fr !important;
+}
+
+body.runtime-environment-mode .runtime-metrics,
+body.desktop-app.runtime-environment-mode .runtime-metrics {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 14px !important;
+  height: auto !important;
+}
+
+@media (max-width: 1280px) {
+  body.runtime-environment-mode .runtime-env-grid,
+  body.desktop-app.runtime-environment-mode .runtime-env-grid,
+  body.runtime-environment-mode .runtime-metrics,
+  body.desktop-app.runtime-environment-mode .runtime-metrics {
+    grid-template-columns: 1fr !important;
+  }
+
+  body.runtime-environment-mode .runtime-env-map,
+  body.desktop-app.runtime-environment-mode .runtime-env-map {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+body.desktop-app .room-toolbar span::after {
+  content: " 自动适配" !important;
+}
+
+body.desktop-app .room-toolbar span::after {
+  content: " 自动适配" !important;
+}
+body.desktop-app .room-toolbar span::after {
+  content: " 自动适配" !important;
+}
+
+/* Final project feature map: keep runtime inside the normal app layout. */
+body.runtime-environment-mode .app-shell,
+body.desktop-app.runtime-environment-mode .app-shell {
+  grid-template-columns: 280px minmax(0, 1fr) !important;
+}
+
+body.runtime-environment-mode .sidebar,
+body.desktop-app.runtime-environment-mode .sidebar {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+body.runtime-environment-mode .agent-strip,
+body.desktop-app.runtime-environment-mode .agent-strip,
+body.runtime-environment-mode .bottom-panel,
+body.desktop-app.runtime-environment-mode .bottom-panel,
+body.runtime-environment-mode .coder-studio,
+body.desktop-app.runtime-environment-mode .coder-studio,
+body.runtime-environment-mode .feishu-chat-window,
+body.desktop-app.runtime-environment-mode .feishu-chat-window {
+  display: none !important;
+}
+
+body.runtime-environment-mode .main,
+body.desktop-app.runtime-environment-mode .main {
+  grid-column: 2 !important;
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr) !important;
+  width: 100% !important;
+  height: 100vh !important;
+  min-width: 0 !important;
+  overflow: auto !important;
+  padding: 22px 24px 24px !important;
+  background: #090d18 !important;
+}
+
+body.desktop-app.runtime-environment-mode .main {
+  height: calc(100vh - var(--desktop-chrome-height)) !important;
+}
+
+body.runtime-environment-mode .topbar,
+body.desktop-app.runtime-environment-mode .topbar {
+  grid-row: 1 !important;
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 40 !important;
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  margin-bottom: 16px !important;
+  background: rgba(9, 13, 24, 0.94) !important;
+  backdrop-filter: blur(14px) !important;
+}
+
+body.runtime-environment-mode .runtime-environment-view.active,
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  grid-row: 2 !important;
+  position: static !important;
+  inset: auto !important;
+  z-index: auto !important;
+  display: block !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+  background: transparent !important;
+}
+
+body.runtime-environment-mode .runtime-board,
+body.desktop-app.runtime-environment-mode .runtime-board {
+  grid-template-rows: auto auto auto auto !important;
+  gap: 16px !important;
+  width: 100% !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+body.runtime-environment-mode .runtime-board-hero,
+body.desktop-app.runtime-environment-mode .runtime-board-hero {
+  min-height: 112px !important;
+  border-radius: 8px !important;
+  background:
+    linear-gradient(120deg, rgba(33, 214, 231, 0.16), rgba(47, 224, 152, 0.08) 42%, rgba(255, 196, 77, 0.1)),
+    #10172b !important;
+}
+
+body.runtime-environment-mode .runtime-board-hero h2,
+body.desktop-app.runtime-environment-mode .runtime-board-hero h2 {
+  font-size: 34px !important;
+  line-height: 1.08 !important;
+}
+
+body.runtime-environment-mode .runtime-board-main,
+body.desktop-app.runtime-environment-mode .runtime-board-main {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 300px !important;
+  gap: 16px !important;
+  width: 100% !important;
+  align-items: stretch !important;
+}
+
+.runtime-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(190px, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.runtime-feature-card {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 14px;
+  min-height: 172px;
+  padding: 16px;
+  border: 1px solid rgba(56, 68, 112, 0.86);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 58%),
+    #10172b;
+}
+
+.runtime-feature-card.primary {
+  border-color: rgba(47, 224, 152, 0.62);
+  background:
+    linear-gradient(180deg, rgba(47, 224, 152, 0.12), transparent 68%),
+    #10172b;
+}
+
+.runtime-feature-card span {
+  display: block;
+  color: #8fa6d8;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.runtime-feature-card strong {
+  display: block;
+  margin-top: 8px;
+  color: #edf3ff;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.runtime-feature-card p {
+  margin: 9px 0 0;
+  color: #aab7d6;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.runtime-feature-card button {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid rgba(33, 214, 231, 0.44);
+  border-radius: 7px;
+  background: rgba(33, 214, 231, 0.12);
+  color: #dff8ff;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.runtime-feature-card button:hover {
+  border-color: rgba(47, 224, 152, 0.7);
+  background: rgba(47, 224, 152, 0.14);
+}
+
+body.runtime-environment-mode .runtime-board-services,
+body.desktop-app.runtime-environment-mode .runtime-board-services {
+  min-height: 0 !important;
+  border-radius: 8px !important;
+}
+
+body.runtime-environment-mode .runtime-board-service,
+body.desktop-app.runtime-environment-mode .runtime-board-service {
+  grid-template-columns: 10px minmax(0, 0.85fr) minmax(0, 1.15fr) !important;
+  min-height: 56px !important;
+}
+
+body.runtime-environment-mode .runtime-project-panel,
+body.desktop-app.runtime-environment-mode .runtime-project-panel,
+body.runtime-environment-mode .runtime-board-metrics article,
+body.desktop-app.runtime-environment-mode .runtime-board-metrics article {
+  border-radius: 8px !important;
+}
+
+@media (max-width: 1500px) {
+  .runtime-feature-grid {
+    grid-template-columns: repeat(3, minmax(190px, 1fr));
+  }
+}
+
+@media (max-width: 1180px) {
+  body.runtime-environment-mode .runtime-board-main,
+  body.desktop-app.runtime-environment-mode .runtime-board-main {
+    grid-template-columns: 1fr !important;
+  }
+
+  .runtime-feature-grid,
+  body.runtime-environment-mode .runtime-board-metrics,
+  body.desktop-app.runtime-environment-mode .runtime-board-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  body.runtime-environment-mode .app-shell,
+  body.desktop-app.runtime-environment-mode .app-shell {
+    grid-template-columns: 1fr !important;
+  }
+
+  body.runtime-environment-mode .sidebar,
+  body.desktop-app.runtime-environment-mode .sidebar {
+    display: none !important;
+  }
+
+  body.runtime-environment-mode .main,
+  body.desktop-app.runtime-environment-mode .main {
+    padding: 14px !important;
+  }
+
+  body.runtime-environment-mode .runtime-board-hero,
+  body.desktop-app.runtime-environment-mode .runtime-board-hero,
+  body.runtime-environment-mode .runtime-project-grid,
+  body.desktop-app.runtime-environment-mode .runtime-project-grid,
+  .runtime-feature-grid,
+  body.runtime-environment-mode .runtime-board-metrics,
+  body.desktop-app.runtime-environment-mode .runtime-board-metrics {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Runtime project preview: the center is the live project surface; controls stay below. */
+body.runtime-environment-mode .runtime-board,
+body.desktop-app.runtime-environment-mode .runtime-board {
+  grid-template-rows: auto minmax(420px, 1fr) auto auto !important;
+  gap: 14px !important;
+}
+
+body.runtime-environment-mode .runtime-board-hero,
+body.desktop-app.runtime-environment-mode .runtime-board-hero {
+  min-height: 92px !important;
+  padding: 16px 18px !important;
+  border-color: rgba(56, 68, 112, 0.72) !important;
+  background:
+    linear-gradient(120deg, rgba(33, 214, 231, 0.12), rgba(47, 224, 152, 0.07) 48%, rgba(255, 196, 77, 0.06)),
+    #10172b !important;
+}
+
+body.runtime-environment-mode .runtime-board-hero h2,
+body.desktop-app.runtime-environment-mode .runtime-board-hero h2 {
+  margin: 4px 0 !important;
+  font-size: 28px !important;
+}
+
+body.runtime-environment-mode .runtime-board-hero p,
+body.desktop-app.runtime-environment-mode .runtime-board-hero p {
+  max-width: 980px !important;
+  font-size: 13px !important;
+}
+
+body.runtime-environment-mode .runtime-board-score,
+body.desktop-app.runtime-environment-mode .runtime-board-score {
+  min-height: 70px !important;
+  border-radius: 8px !important;
+}
+
+body.runtime-environment-mode .runtime-board-score strong,
+body.desktop-app.runtime-environment-mode .runtime-board-score strong {
+  font-size: 28px !important;
+}
+
+body.runtime-environment-mode .runtime-board-main,
+body.desktop-app.runtime-environment-mode .runtime-board-main {
+  grid-template-columns: minmax(0, 1fr) 220px !important;
+  min-height: 420px !important;
+}
+
+.runtime-preview-window {
+  display: grid;
+  grid-template-rows: 42px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 420px;
+  overflow: hidden;
+  border: 1px solid rgba(56, 68, 112, 0.86);
+  border-radius: 8px;
+  background: #070b15;
+}
+
+.runtime-preview-chrome {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 0 12px;
+  border-bottom: 1px solid rgba(56, 68, 112, 0.72);
+  background: #10172b;
+}
+
+.runtime-preview-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.runtime-preview-dots b {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #ff5f57;
+}
+
+.runtime-preview-dots b:nth-child(2) {
+  background: #ffc44d;
+}
+
+.runtime-preview-dots b:nth-child(3) {
+  background: #2fe098;
+}
+
+.runtime-preview-address {
+  min-width: 0;
+  height: 26px;
+  overflow: hidden;
+  padding: 5px 10px;
+  border: 1px solid rgba(56, 68, 112, 0.76);
+  border-radius: 6px;
+  background: rgba(7, 11, 21, 0.92);
+  color: #8fa6d8;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-preview-chrome button {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid rgba(33, 214, 231, 0.4);
+  border-radius: 6px;
+  background: rgba(33, 214, 231, 0.1);
+  color: #dff8ff;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.runtime-preview-chrome button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45 !important;
+}
+
+.runtime-preview-stage {
+  position: relative;
+  min-height: 0;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+    #0b1020;
+  background-size: 32px 32px;
+}
+
+.runtime-preview-stage iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+  background: #fff;
+}
+
+.runtime-preview-stage iframe.active {
+  opacity: 1 !important;
+  pointer-events: auto;
+}
+
+.runtime-preview-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  padding: 30px;
+  text-align: center;
+}
+
+.runtime-preview-empty.hidden {
+  display: none !important;
+}
+
+.runtime-preview-empty span {
+  color: #21d6e7;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.runtime-preview-empty strong {
+  color: #edf3ff;
+  font-size: 24px;
+}
+
+.runtime-preview-empty p {
+  max-width: 520px;
+  margin: 0;
+  color: #8fa6d8;
+  line-height: 1.55;
+}
+
+body.runtime-environment-mode .runtime-quick-actions,
+body.desktop-app.runtime-environment-mode .runtime-quick-actions {
+  display: grid !important;
+  align-content: start !important;
+  gap: 8px !important;
+  min-height: 0 !important;
+  padding: 12px !important;
+}
+
+.runtime-quick-actions button {
+  min-height: 38px;
+  border: 1px solid rgba(56, 68, 112, 0.86);
+  border-radius: 7px;
+  background: rgba(16, 23, 43, 0.94);
+  color: #dbe6ff;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.runtime-quick-actions button:hover {
+  border-color: rgba(33, 214, 231, 0.7);
+  color: #dff8ff;
+}
+
+body.runtime-environment-mode .runtime-project-panel,
+body.desktop-app.runtime-environment-mode .runtime-project-panel {
+  padding: 14px !important;
+  background: rgba(13, 18, 35, 0.86) !important;
+}
+
+body.runtime-environment-mode .runtime-project-grid,
+body.desktop-app.runtime-environment-mode .runtime-project-grid {
+  grid-template-columns: minmax(0, 1fr) 260px !important;
+}
+
+body.runtime-environment-mode .runtime-project-copy,
+body.desktop-app.runtime-environment-mode .runtime-project-copy {
+  min-height: 92px !important;
+  padding: 14px !important;
+}
+
+body.runtime-environment-mode .runtime-project-copy h3,
+body.desktop-app.runtime-environment-mode .runtime-project-copy h3 {
+  font-size: 18px !important;
+}
+
+body.runtime-environment-mode .runtime-project-actions,
+body.desktop-app.runtime-environment-mode .runtime-project-actions {
+  gap: 8px !important;
+}
+
+body.runtime-environment-mode .runtime-project-actions button,
+body.desktop-app.runtime-environment-mode .runtime-project-actions button {
+  min-height: 38px !important;
+}
+
+body.runtime-environment-mode .runtime-board-metrics,
+body.desktop-app.runtime-environment-mode .runtime-board-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 10px !important;
+}
+
+body.runtime-environment-mode .runtime-board-metrics article,
+body.desktop-app.runtime-environment-mode .runtime-board-metrics article {
+  padding: 12px 14px !important;
+}
+
+body.runtime-environment-mode .runtime-board-metrics strong,
+body.desktop-app.runtime-environment-mode .runtime-board-metrics strong {
+  font-size: 22px !important;
+}
+
+@media (max-width: 1180px) {
+  body.runtime-environment-mode .runtime-board-main,
+  body.desktop-app.runtime-environment-mode .runtime-board-main,
+  body.runtime-environment-mode .runtime-project-grid,
+  body.desktop-app.runtime-environment-mode .runtime-project-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  body.runtime-environment-mode .runtime-board-metrics,
+  body.desktop-app.runtime-environment-mode .runtime-board-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Runtime preview polish: softer frame, larger viewport, calmer controls. */
+body.runtime-environment-mode .runtime-board,
+body.desktop-app.runtime-environment-mode .runtime-board {
+  grid-template-rows: auto minmax(470px, 1fr) auto auto !important;
+  gap: 12px !important;
+}
+
+body.runtime-environment-mode .runtime-board-hero,
+body.desktop-app.runtime-environment-mode .runtime-board-hero,
+body.runtime-environment-mode .runtime-project-panel,
+body.desktop-app.runtime-environment-mode .runtime-project-panel,
+body.runtime-environment-mode .runtime-board-metrics article,
+body.desktop-app.runtime-environment-mode .runtime-board-metrics article,
+body.runtime-environment-mode .runtime-quick-actions,
+body.desktop-app.runtime-environment-mode .runtime-quick-actions {
+  border-color: rgba(56, 68, 112, 0.58) !important;
+  box-shadow: none !important;
+}
+
+body.runtime-environment-mode .runtime-board-main,
+body.desktop-app.runtime-environment-mode .runtime-board-main {
+  grid-template-columns: minmax(0, 1fr) 200px !important;
+  gap: 12px !important;
+  min-height: 470px !important;
+}
+
+.runtime-preview-window {
+  grid-template-rows: 38px minmax(0, 1fr) !important;
+  min-height: 470px !important;
+  border-color: rgba(78, 95, 145, 0.72) !important;
+  border-radius: 10px !important;
+  background: #050914 !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.025),
+    0 18px 44px rgba(0, 0, 0, 0.22) !important;
+}
+
+.runtime-preview-chrome {
+  padding: 0 10px !important;
+  border-bottom-color: rgba(56, 68, 112, 0.54) !important;
+  background: rgba(13, 19, 35, 0.94) !important;
+}
+
+.runtime-preview-address {
+  height: 24px !important;
+  border-color: rgba(78, 95, 145, 0.58) !important;
+  background: rgba(5, 9, 20, 0.9) !important;
+  color: #9eb0da !important;
+}
+
+.runtime-preview-stage {
+  overflow: hidden;
+  padding: 28px 36px !important;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(33, 214, 231, 0.08), transparent 38%),
+    #060a16 !important;
+}
+
+.runtime-preview-stage iframe {
+  inset: 28px 36px !important;
+  width: calc(100% - 72px) !important;
+  height: calc(100% - 56px) !important;
+  border: 1px solid rgba(78, 95, 145, 0.5) !important;
+  border-radius: 10px !important;
+  background: #081020 !important;
+  transform: scale(0.92);
+  transform-origin: center center;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.35) !important;
+}
+
+.runtime-preview-stage iframe.active {
+  opacity: 1 !important;
+}
+
+.runtime-preview-empty {
+  inset: 28px 36px !important;
+  border: 1px dashed rgba(78, 95, 145, 0.5);
+  border-radius: 10px;
+  background: rgba(9, 14, 28, 0.58);
+}
+
+body.runtime-environment-mode .runtime-quick-actions,
+body.desktop-app.runtime-environment-mode .runtime-quick-actions {
+  border-radius: 10px !important;
+  background: rgba(10, 15, 30, 0.74) !important;
+}
+
+.runtime-quick-actions button {
+  min-height: 34px !important;
+  border-color: rgba(78, 95, 145, 0.56) !important;
+  background: rgba(16, 23, 43, 0.68) !important;
+  font-size: 11px !important;
+}
+
+body.runtime-environment-mode .runtime-project-panel,
+body.desktop-app.runtime-environment-mode .runtime-project-panel {
+  padding: 12px !important;
+  border-radius: 10px !important;
+  background: rgba(10, 15, 30, 0.82) !important;
+}
+
+body.runtime-environment-mode .runtime-project-copy,
+body.desktop-app.runtime-environment-mode .runtime-project-copy {
+  min-height: 78px !important;
+  border-color: rgba(33, 214, 231, 0.24) !important;
+  background: rgba(13, 19, 35, 0.74) !important;
+}
+
+body.runtime-environment-mode .runtime-project-copy p,
+body.desktop-app.runtime-environment-mode .runtime-project-copy p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+body.runtime-environment-mode .runtime-project-actions button,
+body.desktop-app.runtime-environment-mode .runtime-project-actions button {
+  min-height: 34px !important;
+  border-radius: 7px !important;
+}
+
+body.runtime-environment-mode .runtime-board-metrics,
+body.desktop-app.runtime-environment-mode .runtime-board-metrics {
+  gap: 8px !important;
+}
+
+body.runtime-environment-mode .runtime-board-metrics article,
+body.desktop-app.runtime-environment-mode .runtime-board-metrics article {
+  background: rgba(10, 15, 30, 0.72) !important;
+}
+
+/* Runtime sidebar copy: make the left rail describe the test environment. */
+body.runtime-environment-mode .brand-title,
+body.desktop-app.runtime-environment-mode .brand-title {
+  font-size: 0 !important;
+}
+
+body.runtime-environment-mode .brand-title::after,
+body.desktop-app.runtime-environment-mode .brand-title::after {
+  content: "运行环境";
+  font-size: 16px;
+}
+
+body.runtime-environment-mode .brand-subtitle,
+body.desktop-app.runtime-environment-mode .brand-subtitle {
+  font-size: 0 !important;
+}
+
+body.runtime-environment-mode .brand-subtitle::after,
+body.desktop-app.runtime-environment-mode .brand-subtitle::after {
+  content: "Project Testbed";
+  color: #8fa6d8;
+  font-size: 12px;
+}
+
+body.runtime-environment-mode .sidebar .side-section:first-of-type .section-title span:first-child,
+body.desktop-app.runtime-environment-mode .sidebar .side-section:first-of-type .section-title span:first-child,
+body.runtime-environment-mode .sidebar .side-section:nth-of-type(2) .section-title span:first-child,
+body.desktop-app.runtime-environment-mode .sidebar .side-section:nth-of-type(2) .section-title span:first-child {
+  font-size: 0 !important;
+}
+
+body.runtime-environment-mode .sidebar .side-section:first-of-type .section-title span:first-child::after,
+body.desktop-app.runtime-environment-mode .sidebar .side-section:first-of-type .section-title span:first-child::after {
+  content: "预览状态";
+  font-size: 12px;
+}
+
+body.runtime-environment-mode .sidebar .side-section:nth-of-type(2) .section-title span:first-child::after,
+body.desktop-app.runtime-environment-mode .sidebar .side-section:nth-of-type(2) .section-title span:first-child::after {
+  content: "测试环境";
+  font-size: 12px;
+}
+
+body.runtime-environment-mode .team-card strong,
+body.desktop-app.runtime-environment-mode .team-card strong,
+body.runtime-environment-mode .team-card small,
+body.desktop-app.runtime-environment-mode .team-card small {
+  font-size: 0 !important;
+}
+
+body.runtime-environment-mode .team-card strong::after,
+body.desktop-app.runtime-environment-mode .team-card strong::after {
+  content: "项目 Web UI 预览";
+  color: #edf3ff;
+  font-size: 13px;
+}
+
+body.runtime-environment-mode .team-card small::after,
+body.desktop-app.runtime-environment-mode .team-card small::after {
+  content: "本地运行 / 可视化测试 / Agent 纠错";
+  color: #8fa6d8;
+  font-size: 11px;
+}
+
+body.runtime-environment-mode .task-form::before,
+body.desktop-app.runtime-environment-mode .task-form::before {
+  content: "运行环境任务";
+  grid-column: 1 / -1;
+  color: #21d6e7;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+body.runtime-environment-mode .sidebar .side-section:first-of-type .count-pill,
+body.desktop-app.runtime-environment-mode .sidebar .side-section:first-of-type .count-pill {
+  font-size: 0 !important;
+}
+
+body.runtime-environment-mode .sidebar .side-section:first-of-type .count-pill::after,
+body.desktop-app.runtime-environment-mode .sidebar .side-section:first-of-type .count-pill::after {
+  content: "Live";
+  font-size: 11px;
+}
+
+body.runtime-environment-mode .task-empty strong,
+body.desktop-app.runtime-environment-mode .task-empty strong,
+body.runtime-environment-mode .task-empty span,
+body.desktop-app.runtime-environment-mode .task-empty span {
+  font-size: 0 !important;
+}
+
+body.runtime-environment-mode .task-empty strong::after,
+body.desktop-app.runtime-environment-mode .task-empty strong::after {
+  content: "等待项目运行";
+  font-size: 12px;
+}
+
+body.runtime-environment-mode .task-empty span::after,
+body.desktop-app.runtime-environment-mode .task-empty span::after {
+  content: "启动 Web UI 后，可在中间可视化窗口测试页面并回传错误。";
+  font-size: 11px;
+}
+
+/* Runtime cockpit rewrite. */
+body.runtime-environment-mode .runtime-environment-view.active,
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  overflow: hidden !important;
+  background: transparent !important;
+}
+
+.runtime-cockpit {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  height: 100%;
+  min-height: 0;
+}
+
+.runtime-cockpit-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 16px;
+  align-items: stretch;
+  min-height: 96px;
+  padding: 16px;
+  border: 1px solid rgba(56, 68, 112, 0.58);
+  border-radius: 12px;
+  background:
+    linear-gradient(110deg, rgba(33, 214, 231, 0.12), rgba(47, 224, 152, 0.06) 45%, rgba(255, 196, 77, 0.04)),
+    rgba(12, 18, 34, 0.92);
+}
+
+.runtime-cockpit-head span,
+.runtime-project-summary span,
+.runtime-mini-nav span,
+.runtime-cockpit-foot span {
+  display: block;
+  color: #8fa6d8;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.runtime-cockpit-head h2 {
+  margin: 5px 0 4px;
+  color: #edf3ff;
+  font-size: 30px;
+  line-height: 1.05;
+}
+
+.runtime-cockpit-head p {
+  margin: 0;
+  color: #aab7d6;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.runtime-cockpit-status {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid rgba(47, 224, 152, 0.42);
+  border-radius: 10px;
+  background: rgba(47, 224, 152, 0.08);
+}
+
+.runtime-cockpit-status b {
+  color: #8ddcc9;
+  font-size: 12px;
+}
+
+.runtime-cockpit-status strong {
+  color: #2fe098;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.runtime-cockpit-status span {
+  color: #8fa6d8;
+  font-size: 11px;
+}
+
+.runtime-cockpit-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 14px;
+  min-height: 0;
+}
+
+.runtime-live-surface {
+  display: grid;
+  grid-template-rows: 40px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(78, 95, 145, 0.68);
+  border-radius: 12px;
+  background: #050914;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.24);
+}
+
+.runtime-live-toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 0 12px;
+  border-bottom: 1px solid rgba(56, 68, 112, 0.52);
+  background: rgba(13, 19, 35, 0.96);
+}
+
+.runtime-live-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.runtime-live-dots b {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #ff5f57;
+}
+
+.runtime-live-dots b:nth-child(2) {
+  background: #ffc44d;
+}
+
+.runtime-live-dots b:nth-child(3) {
+  background: #2fe098;
+}
+
+.runtime-live-address {
+  min-width: 0;
+  height: 24px;
+  overflow: hidden;
+  padding: 5px 10px;
+  border: 1px solid rgba(78, 95, 145, 0.56);
+  border-radius: 7px;
+  background: rgba(5, 9, 20, 0.9);
+  color: #9eb0da;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-live-toolbar button,
+.runtime-action-stack button,
+.runtime-mini-nav button {
+  border: 1px solid rgba(33, 214, 231, 0.36);
+  border-radius: 8px;
+  background: rgba(33, 214, 231, 0.1);
+  color: #dff8ff;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.runtime-live-toolbar button {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.runtime-live-frame {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  padding: 18px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(33, 214, 231, 0.08), transparent 36%),
+    #060a16;
+}
+
+.runtime-live-frame iframe {
+  position: absolute;
+  inset: 18px;
+  width: calc(100% - 36px);
+  height: calc(100% - 36px);
+  border: 1px solid rgba(78, 95, 145, 0.52);
+  border-radius: 10px;
+  background: #081020;
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.94);
+  transform-origin: center center;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.32);
+}
+
+.runtime-live-frame iframe.active {
+  opacity: 1 !important;
+  pointer-events: auto;
+}
+
+.runtime-live-empty {
+  position: absolute;
+  inset: 18px;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  padding: 28px;
+  border: 1px dashed rgba(78, 95, 145, 0.5);
+  border-radius: 10px;
+  background: rgba(9, 14, 28, 0.62);
+  text-align: center;
+}
+
+.runtime-live-empty.hidden,
+.runtime-live-empty.is-hidden {
+  display: none !important;
+}
+
+.runtime-live-empty span {
+  color: #21d6e7;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.runtime-live-empty strong {
+  color: #edf3ff;
+  font-size: 24px;
+}
+
+.runtime-live-empty p {
+  max-width: 520px;
+  margin: 0;
+  color: #8fa6d8;
+  line-height: 1.55;
+}
+
+.runtime-control-dock {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  min-height: 0;
+}
+
+.runtime-project-summary,
+.runtime-action-stack,
+.runtime-mini-nav {
+  border: 1px solid rgba(56, 68, 112, 0.58);
+  border-radius: 12px;
+  background: rgba(10, 15, 30, 0.82);
+}
+
+.runtime-project-summary {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 14px;
+}
+
+.runtime-project-summary h3 {
+  margin: 0;
+  color: #edf3ff;
+  font-size: 19px;
+  line-height: 1.2;
+}
+
+.runtime-project-summary p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: #aab7d6;
+  font-size: 12px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 11;
+  white-space: pre-wrap;
+}
+
+.runtime-action-stack,
+.runtime-mini-nav {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.runtime-action-stack button {
+  min-height: 42px;
+  font-size: 13px;
+}
+
+.runtime-action-stack button:first-child {
+  border-color: rgba(47, 224, 152, 0.42);
+  background: rgba(47, 224, 152, 0.12);
+  color: #dfffee;
+}
+
+.runtime-action-stack button:last-child {
+  border-color: rgba(255, 196, 77, 0.42);
+  background: rgba(255, 196, 77, 0.11);
+  color: #fff0c9;
+}
+
+.runtime-mini-nav button {
+  min-height: 34px;
+  border-color: rgba(78, 95, 145, 0.56);
+  background: rgba(16, 23, 43, 0.68);
+  color: #dbe6ff;
+  font-size: 11px;
+}
+
+.runtime-cockpit-foot {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.runtime-cockpit-foot article {
+  padding: 12px 14px;
+  border: 1px solid rgba(56, 68, 112, 0.58);
+  border-radius: 10px;
+  background: rgba(10, 15, 30, 0.72);
+}
+
+.runtime-cockpit-foot strong {
+  display: block;
+  margin-top: 5px;
+  color: #edf3ff;
+  font-size: 22px;
+}
+
+.runtime-cockpit-foot em {
+  display: block;
+  margin-top: 2px;
+  color: #8fa6d8;
+  font-size: 12px;
+  font-style: normal;
+}
+
+@media (max-width: 1280px) {
+  .runtime-cockpit-body {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-control-dock {
+    grid-template-columns: 1fr 280px;
+    grid-template-rows: auto auto;
+  }
+
+  .runtime-mini-nav {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Runtime cockpit hard layout fix: bypass old runtime height rules. */
+body.runtime-environment-mode .main,
+body.desktop-app.runtime-environment-mode .main {
+  height: 100vh !important;
+  overflow: hidden !important;
+}
+
+body.desktop-app.runtime-environment-mode .main {
+  height: calc(100vh - var(--desktop-chrome-height)) !important;
+}
+
+body.runtime-environment-mode .runtime-environment-view.active,
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  position: fixed !important;
+  left: 198px !important;
+  right: 0 !important;
+  top: 92px !important;
+  bottom: 0 !important;
+  z-index: 35 !important;
+  display: block !important;
+  width: auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  padding: 14px 16px 16px !important;
+  background: #070b15 !important;
+}
+
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  top: calc(var(--desktop-chrome-height) + 92px) !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit,
+body.desktop-app.runtime-environment-mode .runtime-cockpit {
+  display: grid !important;
+  grid-template-rows: 86px minmax(0, 1fr) 74px !important;
+  gap: 12px !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-head,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-head {
+  min-height: 0 !important;
+  height: 86px !important;
+  padding: 12px 14px !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-head h2,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-head h2 {
+  font-size: 26px !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-status,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-status {
+  padding: 10px 12px !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-body,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-body {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 300px !important;
+  gap: 12px !important;
+  min-height: 0 !important;
+  height: 100% !important;
+}
+
+body.runtime-environment-mode .runtime-live-surface,
+body.desktop-app.runtime-environment-mode .runtime-live-surface,
+body.runtime-environment-mode .runtime-control-dock,
+body.desktop-app.runtime-environment-mode .runtime-control-dock {
+  min-height: 0 !important;
+  height: 100% !important;
+}
+
+body.runtime-environment-mode .runtime-live-frame,
+body.desktop-app.runtime-environment-mode .runtime-live-frame {
+  min-height: 0 !important;
+  height: 100% !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-foot,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-foot {
+  height: 74px !important;
+  min-height: 0 !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-foot article,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-foot article {
+  min-height: 0 !important;
+  padding: 10px 12px !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-foot strong,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-foot strong {
+  font-size: 18px !important;
+}
+
+/* Runtime clean room: one preview, one control strip, no noisy side rail. */
+body.runtime-environment-mode .app-shell,
+body.desktop-app.runtime-environment-mode .app-shell {
+  grid-template-columns: 1fr !important;
+}
+
+body.runtime-environment-mode .sidebar,
+body.desktop-app.runtime-environment-mode .sidebar {
+  display: none !important;
+}
+
+body.runtime-environment-mode .main,
+body.desktop-app.runtime-environment-mode .main {
+  grid-column: 1 !important;
+  padding: 18px 22px !important;
+  background: #070b15 !important;
+}
+
+body.runtime-environment-mode .runtime-environment-view.active,
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  left: 0 !important;
+  top: 90px !important;
+  padding: 12px 22px 18px !important;
+}
+
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  top: calc(var(--desktop-chrome-height) + 90px) !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit,
+body.desktop-app.runtime-environment-mode .runtime-cockpit {
+  grid-template-rows: 72px minmax(0, 1fr) auto !important;
+  gap: 10px !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-head,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-head {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  height: 72px !important;
+  min-height: 72px !important;
+  padding: 12px 14px !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-head h2,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-head h2 {
+  margin: 2px 0 !important;
+  font-size: 24px !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-head p,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-head p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.runtime-environment-mode .runtime-cockpit-status,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-status {
+  width: 180px !important;
+  padding: 9px 12px !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-body,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-body {
+  grid-template-columns: 1fr !important;
+  grid-template-rows: minmax(0, 1fr) auto !important;
+  gap: 10px !important;
+}
+
+body.runtime-environment-mode .runtime-live-surface,
+body.desktop-app.runtime-environment-mode .runtime-live-surface {
+  border-radius: 10px !important;
+  box-shadow: none !important;
+}
+
+body.runtime-environment-mode .runtime-live-frame,
+body.desktop-app.runtime-environment-mode .runtime-live-frame {
+  padding: 10px !important;
+}
+
+body.runtime-environment-mode .runtime-live-frame iframe,
+body.desktop-app.runtime-environment-mode .runtime-live-frame iframe {
+  inset: 10px !important;
+  width: calc((100% - 20px) / 0.78) !important;
+  height: calc((100% - 20px) / 0.78) !important;
+  transform: scale(0.78) !important;
+  transform-origin: top left !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+body.runtime-environment-mode .runtime-control-dock,
+body.desktop-app.runtime-environment-mode .runtime-control-dock {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 520px !important;
+  grid-template-rows: auto auto !important;
+  gap: 8px !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary,
+body.desktop-app.runtime-environment-mode .runtime-project-summary {
+  grid-column: 1 !important;
+  grid-row: 1 / span 2 !important;
+  min-height: 96px !important;
+  padding: 12px !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary h3,
+body.desktop-app.runtime-environment-mode .runtime-project-summary h3 {
+  font-size: 16px !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary p,
+body.desktop-app.runtime-environment-mode .runtime-project-summary p {
+  -webkit-line-clamp: 3 !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack,
+body.desktop-app.runtime-environment-mode .runtime-action-stack {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack button,
+body.desktop-app.runtime-environment-mode .runtime-action-stack button {
+  min-height: 42px !important;
+}
+
+body.runtime-environment-mode .runtime-mini-nav,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav {
+  grid-column: 2 !important;
+  grid-row: 2 !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+body.runtime-environment-mode .runtime-mini-nav span,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav span {
+  display: none !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-foot,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-foot {
+  display: none !important;
+}
+
+/* Runtime floating actions: independent horizontal bar, not tied to old grids. */
+body.runtime-environment-mode .runtime-floating-actions,
+body.desktop-app.runtime-environment-mode .runtime-floating-actions {
+  position: fixed !important;
+  top: 16px !important;
+  right: 14px !important;
+  z-index: 10020 !important;
+  display: block !important;
+  width: 820px !important;
+  height: 72px !important;
+  pointer-events: auto !important;
+}
+
+body.desktop-app.runtime-environment-mode .runtime-floating-actions {
+  top: calc(var(--desktop-chrome-height) + 16px) !important;
+}
+
+.runtime-primary-actions,
+.runtime-nav-actions {
+  display: grid;
+  gap: 6px;
+}
+
+.runtime-primary-actions {
+  position: absolute;
+  top: 0;
+  left: 0;
+  grid-template-columns: repeat(3, 116px);
+}
+
+.runtime-nav-actions {
+  position: absolute;
+  top: 40px;
+  right: 0;
+  grid-template-columns: repeat(4, 96px);
+}
+
+body.runtime-environment-mode .runtime-floating-actions button,
+body.desktop-app.runtime-environment-mode .runtime-floating-actions button {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 8px !important;
+  border: 1px solid rgba(78, 95, 145, 0.66) !important;
+  border-radius: 8px !important;
+  background: rgba(16, 23, 43, 0.88) !important;
+  color: #dbe6ff !important;
+  font-size: 11px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+  cursor: pointer !important;
+}
+
+body.runtime-environment-mode .runtime-primary-actions button:nth-child(1),
+body.desktop-app.runtime-environment-mode .runtime-primary-actions button:nth-child(1) {
+  border-color: rgba(47, 224, 152, 0.58) !important;
+  background: rgba(47, 224, 152, 0.13) !important;
+  color: #dfffee !important;
+}
+
+body.runtime-environment-mode .runtime-primary-actions button:nth-child(2),
+body.desktop-app.runtime-environment-mode .runtime-primary-actions button:nth-child(2) {
+  border-color: rgba(33, 214, 231, 0.58) !important;
+  background: rgba(33, 214, 231, 0.13) !important;
+  color: #dff8ff !important;
+}
+
+body.runtime-environment-mode .runtime-primary-actions button:nth-child(3),
+body.desktop-app.runtime-environment-mode .runtime-primary-actions button:nth-child(3) {
+  border-color: rgba(255, 196, 77, 0.55) !important;
+  background: rgba(255, 196, 77, 0.12) !important;
+  color: #fff0c9 !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack,
+body.desktop-app.runtime-environment-mode .runtime-action-stack,
+body.runtime-environment-mode .runtime-mini-nav,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav {
+  display: none !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-head,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-head {
+  padding-right: 430px !important;
+}
+
+/* Runtime swap: actions at top-right, status at bottom-right. */
+body.runtime-environment-mode .runtime-cockpit-head,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-head {
+  grid-template-columns: minmax(0, 1fr) 520px !important;
+  padding-right: 552px !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-status,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-status {
+  position: fixed !important;
+  right: 14px !important;
+  bottom: 16px !important;
+  z-index: 10005 !important;
+  width: 170px !important;
+  height: 86px !important;
+  min-height: 0 !important;
+  padding: 10px 12px !important;
+  border: 1px solid rgba(47, 224, 152, 0.5) !important;
+  border-radius: 10px !important;
+  background: rgba(12, 42, 38, 0.92) !important;
+}
+
+body.runtime-environment-mode .runtime-control-dock,
+body.desktop-app.runtime-environment-mode .runtime-control-dock {
+  display: contents !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack,
+body.desktop-app.runtime-environment-mode .runtime-action-stack {
+  position: fixed !important;
+  top: 22px !important;
+  right: 14px !important;
+  z-index: 10006 !important;
+  display: grid !important;
+  grid-template-columns: repeat(3, 150px) !important;
+  gap: 8px !important;
+  width: auto !important;
+  height: 36px !important;
+}
+
+body.desktop-app.runtime-environment-mode .runtime-action-stack {
+  top: calc(var(--desktop-chrome-height) + 22px) !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack button,
+body.desktop-app.runtime-environment-mode .runtime-action-stack button {
+  height: 36px !important;
+  min-height: 36px !important;
+  font-size: 12px !important;
+}
+
+body.runtime-environment-mode .runtime-mini-nav,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav {
+  position: fixed !important;
+  top: 66px !important;
+  right: 14px !important;
+  z-index: 10006 !important;
+  display: grid !important;
+  grid-template-columns: repeat(4, 110px) !important;
+  gap: 8px !important;
+  width: auto !important;
+  height: 34px !important;
+}
+
+body.desktop-app.runtime-environment-mode .runtime-mini-nav {
+  top: calc(var(--desktop-chrome-height) + 66px) !important;
+}
+
+body.runtime-environment-mode .runtime-mini-nav button,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav button {
+  height: 34px !important;
+  min-height: 34px !important;
+  font-size: 11px !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary,
+body.desktop-app.runtime-environment-mode .runtime-project-summary {
+  position: fixed !important;
+  left: 14px !important;
+  right: 198px !important;
+  bottom: 16px !important;
+  z-index: 10004 !important;
+  width: auto !important;
+  height: 86px !important;
+  min-height: 0 !important;
+  padding: 10px 12px !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary p,
+body.desktop-app.runtime-environment-mode .runtime-project-summary p {
+  -webkit-line-clamp: 2 !important;
+}
+
+body.runtime-environment-mode .runtime-live-surface,
+body.desktop-app.runtime-environment-mode .runtime-live-surface {
+  height: calc(100% - 104px) !important;
+}
+
+/* Runtime top cleanup: remove the old app topbar from this page. */
+body.runtime-environment-mode .topbar,
+body.desktop-app.runtime-environment-mode .topbar {
+  display: none !important;
+}
+
+body.runtime-environment-mode .main,
+body.desktop-app.runtime-environment-mode .main {
+  grid-template-rows: minmax(0, 1fr) !important;
+  padding: 0 !important;
+}
+
+body.runtime-environment-mode .runtime-environment-view.active {
+  top: 0 !important;
+  padding: 16px 18px 18px !important;
+}
+
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  top: var(--desktop-chrome-height) !important;
+  padding: 16px 18px 18px !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit,
+body.desktop-app.runtime-environment-mode .runtime-cockpit {
+  grid-template-rows: 76px minmax(0, 1fr) auto !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-head,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-head {
+  height: 76px !important;
+  min-height: 76px !important;
+}
+
+/* Runtime final rewrite: isolated full-screen lab, no inherited war-room chrome. */
+body.runtime-environment-mode .sidebar,
+body.desktop-app.runtime-environment-mode .sidebar,
+body.runtime-environment-mode .topbar,
+body.desktop-app.runtime-environment-mode .topbar,
+body.runtime-environment-mode .agent-layer,
+body.desktop-app.runtime-environment-mode .agent-layer,
+body.runtime-environment-mode .agent-quick-panel,
+body.desktop-app.runtime-environment-mode .agent-quick-panel,
+body.runtime-environment-mode .workspace,
+body.desktop-app.runtime-environment-mode .workspace {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+body.runtime-environment-mode .app-shell,
+body.desktop-app.runtime-environment-mode .app-shell {
+  display: block !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  background: #050914 !important;
+}
+
+body.runtime-environment-mode .main,
+body.desktop-app.runtime-environment-mode .main {
+  display: block !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+  background: #050914 !important;
+}
+
+body.desktop-app.runtime-environment-mode .main {
+  height: calc(100vh - var(--desktop-chrome-height)) !important;
+}
+
+body.runtime-environment-mode .runtime-environment-view.active,
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  position: fixed !important;
+  left: 0 !important;
+  right: 0 !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  z-index: 9995 !important;
+  display: block !important;
+  width: auto !important;
+  height: auto !important;
+  overflow: hidden !important;
+  padding: 14px !important;
+  background:
+    linear-gradient(180deg, rgba(18, 25, 48, 0.94), rgba(5, 9, 20, 0.98)),
+    #050914 !important;
+}
+
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  top: var(--desktop-chrome-height) !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit,
+body.desktop-app.runtime-environment-mode .runtime-cockpit {
+  display: grid !important;
+  grid-template-rows: 64px minmax(0, 1fr) 104px !important;
+  gap: 10px !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-head,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-head {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 160px !important;
+  height: 64px !important;
+  min-height: 64px !important;
+  padding: 10px 12px !important;
+  border: 1px solid rgba(56, 68, 112, 0.62) !important;
+  border-radius: 10px !important;
+  background: rgba(10, 15, 30, 0.9) !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-head h2,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-head h2 {
+  margin: 1px 0 0 !important;
+  font-size: 22px !important;
+  line-height: 1 !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-head p,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-head p {
+  max-width: 900px !important;
+  overflow: hidden !important;
+  color: #9fb0d5 !important;
+  font-size: 12px !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-status,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-status {
+  width: auto !important;
+  min-width: 0 !important;
+  padding: 8px 10px !important;
+  border-radius: 8px !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-status strong,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-status strong {
+  font-size: 22px !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-body,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-body {
+  display: block !important;
+  min-height: 0 !important;
+  height: 100% !important;
+}
+
+body.runtime-environment-mode .runtime-live-surface,
+body.desktop-app.runtime-environment-mode .runtime-live-surface {
+  display: grid !important;
+  grid-template-rows: 36px minmax(0, 1fr) !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  border: 1px solid rgba(78, 95, 145, 0.68) !important;
+  border-radius: 10px !important;
+  background: #060a16 !important;
+  box-shadow: none !important;
+}
+
+body.runtime-environment-mode .runtime-live-toolbar,
+body.desktop-app.runtime-environment-mode .runtime-live-toolbar {
+  height: 36px !important;
+  min-height: 36px !important;
+  padding: 0 10px !important;
+}
+
+body.runtime-environment-mode .runtime-live-frame,
+body.desktop-app.runtime-environment-mode .runtime-live-frame {
+  position: relative !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  padding: 8px !important;
+  overflow: hidden !important;
+  background: #060a16 !important;
+}
+
+body.runtime-environment-mode .runtime-live-frame iframe,
+body.desktop-app.runtime-environment-mode .runtime-live-frame iframe {
+  position: absolute !important;
+  inset: 8px !important;
+  width: calc((100% - 16px) / 0.72) !important;
+  height: calc((100% - 16px) / 0.72) !important;
+  transform: scale(0.72) !important;
+  transform-origin: top left !important;
+  border: 1px solid rgba(78, 95, 145, 0.42) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+body.runtime-environment-mode .runtime-control-dock,
+body.desktop-app.runtime-environment-mode .runtime-control-dock {
+  position: static !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 520px !important;
+  grid-template-rows: 48px 46px !important;
+  gap: 8px !important;
+  height: 104px !important;
+  min-height: 104px !important;
+  margin: 0 !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary,
+body.desktop-app.runtime-environment-mode .runtime-project-summary {
+  grid-column: 1 !important;
+  grid-row: 1 / span 2 !important;
+  min-height: 0 !important;
+  height: 104px !important;
+  padding: 10px 12px !important;
+  border-radius: 10px !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary h3,
+body.desktop-app.runtime-environment-mode .runtime-project-summary h3 {
+  font-size: 15px !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary p,
+body.desktop-app.runtime-environment-mode .runtime-project-summary p {
+  -webkit-line-clamp: 3 !important;
+  font-size: 12px !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack,
+body.desktop-app.runtime-environment-mode .runtime-action-stack,
+body.runtime-environment-mode .runtime-mini-nav,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+body.runtime-environment-mode .runtime-mini-nav,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack button,
+body.desktop-app.runtime-environment-mode .runtime-action-stack button,
+body.runtime-environment-mode .runtime-mini-nav button,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav button {
+  min-height: 0 !important;
+  height: 100% !important;
+  border-radius: 8px !important;
+  font-size: 12px !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-foot,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-foot {
   display: none !important;
 }

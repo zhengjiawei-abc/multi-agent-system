@@ -42,6 +42,7 @@ New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
 
 $paths = @(
   "Agent.py",
+  "cc_switch_config.py",
   "connectors.py",
   "connector_sender.py",
   "desktop.config.json",

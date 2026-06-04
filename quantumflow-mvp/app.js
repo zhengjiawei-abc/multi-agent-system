@@ -249,6 +249,9 @@ let backendConnected = false;
 let backendAutoTimer = null;
 let arbitrationTimer = null;
 let backendQueueStats = { pending: 0, active: 0, blocked: 0, running_total: 0, completed_total: 0 };
+let projectDeliveries = [];
+let activeRuntimeDeliveryId = localStorage.getItem("qfActiveRuntimeDeliveryId") || "";
+const deliveryTestStates = {};
 let adminChatTimer = null;
 const publicChatMessages = [];
 const adminChatMessageIds = new Set();
@@ -258,7 +261,7 @@ let remoteRelayUrl = localStorage.getItem("qfRemoteRelayUrl") || "";
 const publicWorldState = {
   repos: [
     { id: "runtime", name: "quantumflow-runtime", desc: "调度 / WebSocket / Connector", lang: "Python", url: "https://example.com/QuantumFlow/quantumflow-runtime.git" },
-    { id: "desktop", name: "agent-desktop", desc: "战情室 / 源文明 / UI", lang: "JavaScript", url: "https://example.com/QuantumFlow/agent-desktop.git" },
+    { id: "desktop", name: "agent-desktop", desc: "调度中枢 / 源文明 / UI", lang: "JavaScript", url: "https://example.com/QuantumFlow/agent-desktop.git" },
     { id: "connectors", name: "app-connectors", desc: "飞书 / 企业微信 / 微信客服", lang: "Webhook", url: "https://example.com/QuantumFlow/app-connectors.git" },
   ],
   issues: [
@@ -334,6 +337,10 @@ let authToken = "";
 let currentUser = null;
 const AUTH_SESSION_KEY = "qfAuthSession";
 const AUTH_REMEMBER_KEY = "qfRememberLogin";
+const LLM_PLUGIN_CONFIG_KEY = "qfManualLlmPluginConfig";
+let adminLookupTimer = null;
+let selectedAdminUser = null;
+let lastLlmPluginResult = "";
 
 const adminChatMessages = [
   { name: "Admin", role: "Owner", text: "开发者管理中心先保留为管理员入口，正式上线后再开放权限。" },
@@ -386,8 +393,8 @@ const workspaceTasks = [
   { title: "开发者管理中心新增多人协作工作区", owner: "frontend", status: "active" },
 ];
 const workspaceMessages = [
-  { name: "Codex", role: "Pair Agent", text: "我会先把需求拆成 UI、状态、接口、验证四步；开发者可以在这里补充约束，再交给战情室 Agent 执行。" },
-  { name: "Master Agent", role: "Coordinator", text: "协作工作区负责商讨和提交开发任务，真正写代码仍进入战情室调度链路。" },
+  { name: "Codex", role: "Pair Agent", text: "我会先把需求拆成 UI、状态、接口、验证四步；开发者可以在这里补充约束，再交给调度中枢 Agent 执行。" },
+  { name: "Master Agent", role: "Coordinator", text: "协作工作区负责商讨和提交开发任务，真正写代码仍进入调度中枢链路。" },
 ];
 const workspaceCodeEvents = [
   "auth_gate.py :: require_login_before_app_boot()",
@@ -425,6 +432,18 @@ const els = {
   mainView: document.getElementById("mainView"),
   pageTitle: document.querySelector(".topbar h1"),
   warRoomView: document.getElementById("warRoomView"),
+  runtimeEnvironmentView: document.getElementById("runtimeEnvironmentView"),
+  runtimeQueueMetric: document.getElementById("runtimeQueueMetric"),
+  runtimeProjectTitle: document.getElementById("runtimeProjectTitle"),
+  runtimeProjectStatus: document.getElementById("runtimeProjectStatus"),
+  runtimeProjectOutput: document.getElementById("runtimeProjectOutput"),
+  runtimeProjectTestBtn: document.getElementById("runtimeProjectTestBtn"),
+  runtimeProjectOpenBtn: document.getElementById("runtimeProjectOpenBtn"),
+  runtimeProjectFixBtn: document.getElementById("runtimeProjectFixBtn"),
+  runtimeProjectFrame: document.getElementById("runtimeProjectFrame"),
+  runtimePreviewEmpty: document.getElementById("runtimePreviewEmpty"),
+  runtimePreviewAddress: document.getElementById("runtimePreviewAddress"),
+  runtimePreviewRefreshBtn: document.getElementById("runtimePreviewRefreshBtn"),
   communityView: document.getElementById("communityView"),
   openSourceWorldView: document.getElementById("openSourceWorldView"),
   profileView: document.getElementById("profileView"),
@@ -448,6 +467,8 @@ const els = {
   adminApiDesc: document.getElementById("adminApiDesc"),
   adminApiList: document.getElementById("adminApiList"),
   adminMemberForm: document.getElementById("adminMemberForm"),
+  adminMemberUserId: document.getElementById("adminMemberUserId"),
+  adminMemberLookupState: document.getElementById("adminMemberLookupState"),
   adminMemberName: document.getElementById("adminMemberName"),
   adminMemberRole: document.getElementById("adminMemberRole"),
   adminMemberProject: document.getElementById("adminMemberProject"),
@@ -577,6 +598,17 @@ const els = {
   manualSaveBtn: document.getElementById("manualSaveBtn"),
   manualCancelBtn: document.getElementById("manualCancelBtn"),
   manualEditState: document.getElementById("manualEditState"),
+  llmPluginPanel: document.getElementById("llmPluginPanel"),
+  llmPluginProvider: document.getElementById("llmPluginProvider"),
+  llmPluginModel: document.getElementById("llmPluginModel"),
+  llmPluginBaseUrl: document.getElementById("llmPluginBaseUrl"),
+  llmPluginApiKey: document.getElementById("llmPluginApiKey"),
+  llmPluginPrompt: document.getElementById("llmPluginPrompt"),
+  llmPluginOutput: document.getElementById("llmPluginOutput"),
+  llmPluginSaveBtn: document.getElementById("llmPluginSaveBtn"),
+  llmPluginGenerateBtn: document.getElementById("llmPluginGenerateBtn"),
+  llmPluginInsertBtn: document.getElementById("llmPluginInsertBtn"),
+  llmPluginReviewBtn: document.getElementById("llmPluginReviewBtn"),
   fileTree: document.getElementById("fileTree"),
   worldTaskCount: document.getElementById("worldTaskCount"),
   onlineCount: document.getElementById("onlineCount"),
@@ -680,6 +712,12 @@ function hideAuthShell() {
     if (location.protocol !== "file:") history.replaceState(null, "", "/war-room");
     switchView("warRoom");
   }
+}
+
+function enterDefaultAfterAuth() {
+  if (location.protocol !== "file:") history.replaceState(null, "", "/war-room");
+  hideAuthShell();
+  switchView("warRoom");
 }
 
 function isAuthRoute(pathname = location.pathname) {
@@ -928,7 +966,7 @@ async function submitLogin(event) {
     saveRememberedLogin(account, password);
     storeAuthSession(data.token, data.user);
     setAuthStatus("登录成功，已进入 QuantumFlow 测试版。", "ok");
-    hideAuthShell();
+    enterDefaultAfterAuth();
   } catch (error) {
     setAuthStatus(error.message || "登录失败。", "warn");
   }
@@ -955,7 +993,7 @@ async function submitRegister(event) {
     if (!response.ok) throw new Error(data.detail || "注册失败");
     storeAuthSession(data.token, data.user);
     setAuthStatus("注册成功，已自动登录。", "ok");
-    hideAuthShell();
+    enterDefaultAfterAuth();
   } catch (error) {
     setAuthStatus(error.message || "注册失败。", "warn");
   }
@@ -1122,10 +1160,13 @@ function renderAgents() {
       renderAgentStrip();
       openAgentQuickPanel(agentById(selectedAgentId));
     });
-    node.addEventListener("dblclick", () => {
+    node.addEventListener("dblclick", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       selectedAgentId = node.dataset.agent;
-      closeAgentQuickPanel();
-      jumpAgentToCodeArea(agentById(selectedAgentId));
+      renderAgents();
+      renderAgentStrip();
+      openAgentQuickPanel(agentById(selectedAgentId));
     });
   });
 }
@@ -1160,7 +1201,7 @@ function openAgentQuickPanel(agent) {
     <strong>速览模式</strong>
     <p>这里可以直接看这个 Agent 正在写什么、每行代码的意图，以及它和当前业务流的关系。</p>
     <strong>继续深入</strong>
-    <p>需要改代码时再进入完整编辑器；不想切页面时，就留在战情室查看人物旁边的工作状态。</p>
+    <p>需要改代码时再进入完整编辑器；不想切页面时，就留在调度中枢查看人物旁边的工作状态。</p>
   `;
   els.agentQuickPanel.classList.add("active");
   els.agentQuickPanel.setAttribute("aria-hidden", "false");
@@ -1220,7 +1261,7 @@ function openCoderStudio(agent) {
 
   els.studioExplain.innerHTML = `
     <p><strong>当前任务</strong>${escapeHtml(task ? task.title : "暂无任务，等待调度。")}</p>
-    <p><strong>自动化编程</strong>战情室会继续按后端任务状态移动、执行、完成；这个工作台负责展示它正在写什么，以及每行代码为什么这样写。</p>
+    <p><strong>自动化编程</strong>调度中枢会继续按后端任务状态移动、执行、完成；这个工作台负责展示它正在写什么，以及每行代码为什么这样写。</p>
     <p><strong>讲解模式</strong>点击角色后，这里会跟随角色身份解释代码意图。后续可接入真实 LLM，把实际生成的 patch 逐行解释给你。</p>
     <p><strong>消息反馈</strong>接入企业微信、飞书、微信客服、抖音后，外部消息会变成任务；执行完成后写入反馈队列，再自动回到对应会话。</p>
   `;
@@ -1264,6 +1305,7 @@ function renderTasks() {
         <strong>等待真实任务</strong>
         <span>飞书 / 手动 / Bot 命令进入后会自动进入队列并立即执行。</span>
       </div>
+      ${renderProjectDeliveryCards()}
     `;
     renderCommunity();
     return;
@@ -1280,11 +1322,197 @@ function renderTasks() {
       </div>
     `,
     )
-    .join("");
+    .join("") + renderProjectDeliveryCards();
   document.querySelectorAll(".task-item").forEach((node) => {
     node.addEventListener("click", () => runTask(Number(node.dataset.task)));
   });
+  document.querySelectorAll("[data-test-delivery]").forEach((button) => {
+    button.addEventListener("click", () => openDeliveryRuntimeEnvironment(button.dataset.testDelivery));
+  });
+  document.querySelectorAll("[data-open-delivery]").forEach((button) => {
+    button.addEventListener("click", () => openProjectDeliveryRuntime(button.dataset.openDelivery));
+  });
+  renderRuntimeEnvironment();
   renderCommunity();
+}
+
+function renderProjectDeliveryCards() {
+  if (!projectDeliveries.length) return "";
+  return `
+    <div class="project-delivery-list">
+      ${projectDeliveries
+        .slice(0, 4)
+        .map(
+          (delivery) => {
+            const testState = deliveryTestStates[delivery.id] || delivery.last_test_status || "";
+            const testText = "运行环境";
+            const testClass = testState ? ` ${testState}` : "";
+            const testOutput = deliveryTestStates[`${delivery.id}:output`] || delivery.last_test_output || "";
+            const runtimeUrl = deliveryTestStates[`${delivery.id}:url`] || delivery.runtime_url || "";
+            return `
+        <article class="project-delivery-card${String(delivery.id) === String(getActiveRuntimeDelivery()?.id || "") ? " active" : ""}">
+          <div>
+            <strong>${escapeHtml(delivery.title || "已完成项目")}</strong>
+            <span>${escapeHtml(delivery.validation || "项目已通过基础校验")}</span>
+            <em>${escapeHtml(runtimeUrl || (delivery.last_test_at ? `测试：${delivery.last_test_status} / ${delivery.last_test_at}` : delivery.created_at || ""))}</em>
+            ${testOutput ? `<small>${escapeHtml(testOutput).slice(0, 180)}</small>` : ""}
+          </div>
+          <div class="project-delivery-actions">
+            <button type="button" class="delivery-test-button${testClass}" data-test-delivery="${escapeHtml(delivery.id)}">${escapeHtml(testText)}</button>
+            <button type="button" class="delivery-open-button" data-open-delivery="${escapeHtml(delivery.id)}">打开网页</button>
+            <a href="${escapeHtml(delivery.download_url || `/api/project-deliveries/${delivery.id}/download`)}" download>下载项目安装包</a>
+          </div>
+        </article>
+      `;
+          },
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function getActiveRuntimeDelivery() {
+  if (!projectDeliveries.length) return null;
+  return projectDeliveries.find((delivery) => String(delivery.id) === String(activeRuntimeDeliveryId)) || projectDeliveries[0];
+}
+
+function setActiveRuntimeDelivery(deliveryId) {
+  if (!deliveryId) return;
+  activeRuntimeDeliveryId = String(deliveryId);
+  localStorage.setItem("qfActiveRuntimeDeliveryId", activeRuntimeDeliveryId);
+}
+
+function runtimeDeliveryStatus(delivery) {
+  if (!delivery) return "等待项目交付";
+  const state = deliveryTestStates[delivery.id] || delivery.last_test_status || delivery.runtime_status || "";
+  if (state === "testing") return "测试中";
+  if (state === "passed" || state === "running") return "环境可运行";
+  if (state === "failed") return "需要纠错";
+  return "待测试";
+}
+
+function renderRuntimeEnvironment() {
+  const delivery = getActiveRuntimeDelivery();
+  if (els.runtimeQueueMetric) {
+    els.runtimeQueueMetric.textContent = `${backendQueueStats.pending || 0}/${backendQueueStats.active || 0}`;
+  }
+  const setPreview = (url = "") => {
+    const hasUrl = Boolean(url);
+    if (els.runtimePreviewAddress) els.runtimePreviewAddress.textContent = hasUrl ? url : "等待项目 Web UI 启动";
+    if (els.runtimeProjectFrame) {
+      if (hasUrl && els.runtimeProjectFrame.src !== url) els.runtimeProjectFrame.src = url;
+      els.runtimeProjectFrame.classList.toggle("active", hasUrl);
+    }
+    els.runtimePreviewEmpty?.classList.toggle("hidden", hasUrl);
+    els.runtimePreviewEmpty?.classList.toggle("is-hidden", hasUrl);
+    if (els.runtimePreviewRefreshBtn) els.runtimePreviewRefreshBtn.disabled = !hasUrl;
+  };
+  if (!els.runtimeProjectTitle) {
+    setPreview("");
+    return;
+  }
+  if (!delivery) {
+    els.runtimeProjectTitle.textContent = "暂无可运行项目";
+    els.runtimeProjectStatus.textContent = "等待项目交付";
+    els.runtimeProjectOutput.textContent = "项目交付完成后，在这里启动测试环境；中间窗口会直接显示项目网页。";
+    setPreview("");
+    [els.runtimeProjectTestBtn, els.runtimeProjectOpenBtn, els.runtimeProjectFixBtn].forEach((button) => {
+      if (button) button.disabled = true;
+    });
+    return;
+  }
+  setActiveRuntimeDelivery(delivery.id);
+  const output = deliveryTestStates[`${delivery.id}:output`] || delivery.last_test_output || "";
+  const runtimeUrl = deliveryTestStates[`${delivery.id}:url`] || delivery.runtime_url || "";
+  els.runtimeProjectTitle.textContent = delivery.title || "已完成项目";
+  els.runtimeProjectStatus.textContent = runtimeDeliveryStatus(delivery);
+  els.runtimeProjectOutput.textContent = runtimeUrl
+    ? `网页地址：${runtimeUrl}${output ? `\n\n${output}` : ""}`
+    : output || "还没有启动项目。点击“测试运行环境”会先做接口烟测，点击“打开项目网页”会启动本地 Web UI。";
+  setPreview(runtimeUrl);
+  if (els.runtimeProjectTestBtn) els.runtimeProjectTestBtn.disabled = deliveryTestStates[delivery.id] === "testing";
+  if (els.runtimeProjectOpenBtn) els.runtimeProjectOpenBtn.disabled = false;
+  if (els.runtimeProjectFixBtn) els.runtimeProjectFixBtn.disabled = false;
+}
+
+async function testProjectDelivery(deliveryId) {
+  if (!deliveryId) return;
+  setActiveRuntimeDelivery(deliveryId);
+  deliveryTestStates[deliveryId] = "testing";
+  deliveryTestStates[`${deliveryId}:output`] = "正在启动测试环境并执行烟测...";
+  renderTasks();
+  renderRuntimeEnvironment();
+  try {
+    const response = await fetch(`/api/project-deliveries/${encodeURIComponent(deliveryId)}/test`, { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "测试失败");
+    const delivery = data.delivery || {};
+    deliveryTestStates[deliveryId] = data.ok ? "passed" : "failed";
+    deliveryTestStates[`${deliveryId}:output`] = data.output || delivery.last_test_output || "";
+    if (data.runtime_url || delivery.runtime_url) deliveryTestStates[`${deliveryId}:url`] = data.runtime_url || delivery.runtime_url;
+    projectDeliveries = projectDeliveries.map((item) => (String(item.id) === String(deliveryId) ? { ...item, ...delivery } : item));
+    addLog(data.ok ? "项目运行环境测试通过。" : "项目运行环境测试失败。", "Tester");
+  } catch (error) {
+    deliveryTestStates[deliveryId] = "failed";
+    deliveryTestStates[`${deliveryId}:output`] = error.message || "测试失败";
+    addLog(`项目运行环境测试失败：${error.message || "unknown"}`, "Tester");
+  }
+  renderTasks();
+  renderRuntimeEnvironment();
+}
+
+function openDeliveryRuntimeEnvironment(deliveryId) {
+  if (deliveryId) setActiveRuntimeDelivery(deliveryId);
+  renderRuntimeEnvironment();
+  switchView("runtimeEnvironment");
+}
+
+async function openProjectDeliveryRuntime(deliveryId) {
+  if (!deliveryId) return;
+  setActiveRuntimeDelivery(deliveryId);
+  deliveryTestStates[`${deliveryId}:output`] = "正在启动项目 Web UI...";
+  renderRuntimeEnvironment();
+  try {
+    const response = await fetch(`/api/project-deliveries/${encodeURIComponent(deliveryId)}/run`, { method: "POST" });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.detail || data.output || "启动项目失败");
+    const delivery = data.delivery || {};
+    const runtimeUrl = data.url || delivery.runtime_url || "";
+    if (runtimeUrl) deliveryTestStates[`${deliveryId}:url`] = runtimeUrl;
+    deliveryTestStates[deliveryId] = data.status || "running";
+    deliveryTestStates[`${deliveryId}:output`] = data.output || "项目 Web UI 已启动。";
+    projectDeliveries = projectDeliveries.map((item) => (String(item.id) === String(deliveryId) ? { ...item, ...delivery, runtime_url: runtimeUrl } : item));
+    renderTasks();
+    renderRuntimeEnvironment();
+    if (runtimeUrl) {
+      if (window.quantumflowDesktop?.openExternal) {
+        await window.quantumflowDesktop.openExternal(runtimeUrl);
+      } else {
+        window.open(runtimeUrl, "_blank", "noopener");
+      }
+    }
+  } catch (error) {
+    deliveryTestStates[deliveryId] = "failed";
+    deliveryTestStates[`${deliveryId}:output`] = error.message || "启动项目失败";
+    addLog(`项目 Web UI 启动失败：${error.message || "unknown"}`, "Tester");
+    renderTasks();
+    renderRuntimeEnvironment();
+  }
+}
+
+async function requestProjectDeliveryFix(deliveryId) {
+  if (!deliveryId) return;
+  setActiveRuntimeDelivery(deliveryId);
+  try {
+    const response = await fetch(`/api/project-deliveries/${encodeURIComponent(deliveryId)}/fix`, { method: "POST" });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.detail || "创建纠错任务失败");
+    addLog("已把运行失败日志送回 Agent 纠错。", "Master");
+    if (data.snapshot) applySnapshot(data.snapshot);
+  } catch (error) {
+    addLog(`创建纠错任务失败：${error.message || "unknown"}`, "Master");
+  }
+  renderRuntimeEnvironment();
 }
 
 function renderCommunity() {
@@ -1293,8 +1521,9 @@ function renderCommunity() {
   const fileNames = Object.keys(activeRepo.files);
   if (!activeRepo.files[activeFileName]) activeFileName = fileNames[0];
 
-  els.onlineCount.textContent = String(people.length + agents.length + 6);
-  els.onlineMiniCount.textContent = String(people.length + agents.length + 6);
+  const onlineRows = realOnlineCollaboratorRows();
+  els.onlineCount.textContent = String(onlineRows.length);
+  els.onlineMiniCount.textContent = String(onlineRows.length);
   els.worldTaskCount.textContent = String(tasks.filter((task) => task.status !== "done").length);
 
   els.repoList.innerHTML = openWorldRepos
@@ -1336,16 +1565,7 @@ function renderCommunity() {
       .join("");
   }
 
-  els.peopleList.innerHTML = people
-    .map(
-      ([name, role, color]) => `
-      <div class="person-item">
-        <i style="background:${color}"></i>
-        <span><strong>${name}</strong><em>${role}</em></span>
-      </div>
-    `,
-    )
-    .join("");
+  renderSourceOnlineCollaborators(onlineRows);
 
   els.activeRepoName.textContent = activeRepo.name;
   els.fileTree.innerHTML = fileNames
@@ -1591,6 +1811,19 @@ function switchOpenSourcePanel(panelId = "oswDashboardPanel") {
   if (target === "oswChatPanel") renderPublicChat();
   renderPublicWorldOnline();
   renderOpenSourceWorld();
+}
+
+function openRuntimeFeature(button) {
+  const targetView = button.dataset.runtimeOpenView || "warRoom";
+  const worldPanel = button.dataset.runtimeWorldPanel;
+  const oswPanel = button.dataset.runtimeOswPanel;
+  const adminPanel = button.dataset.runtimeAdminPanel;
+  switchView(targetView);
+  window.setTimeout(() => {
+    if (worldPanel) switchOpenWorldPanel(worldPanel);
+    if (oswPanel) switchOpenSourcePanel(oswPanel);
+    if (adminPanel) switchAdminPanel(adminPanel);
+  }, 0);
 }
 
 function handleOpenSourceClick(event) {
@@ -2134,6 +2367,8 @@ function setManualEditMode(enabled) {
   document.body.classList.toggle("manual-coding-mode", enabled);
   els.manualCodeEditor.classList.toggle("active", enabled);
   els.manualCodeEditor.setAttribute("aria-hidden", String(!enabled));
+  els.llmPluginPanel?.classList.toggle("active", enabled);
+  els.llmPluginPanel?.setAttribute("aria-hidden", String(!enabled));
   els.repoCodeView.classList.toggle("hidden", enabled);
   if (els.manualEditBtn) els.manualEditBtn.hidden = enabled;
   if (els.manualCompleteBtn) els.manualCompleteBtn.hidden = !enabled;
@@ -2151,6 +2386,7 @@ function setManualEditMode(enabled) {
   if (enabled) {
     els.manualCodeEditor.value = currentEditableCodeLines().join("\n");
     els.manualCodeEditor.focus();
+    loadLlmPluginConfig();
   }
 }
 
@@ -2163,32 +2399,146 @@ function switchCodingMode(mode) {
   setManualEditMode(manualMode);
 }
 
-function completeManualCode() {
+async function completeManualCode() {
   if (!els.manualCodeEditor) return;
   const title = els.autoCodeInput?.value.trim() || publicWorldText?.() || "完善当前功能";
-  const now = new Date().toLocaleTimeString("zh-CN", { hour12: false });
-  const suffix = activeFileName.endsWith(".py")
-    ? [
-        "",
-        `# completed by QuantumFlow manual assistant at ${now}`,
-        "def quantumflow_completion_context():",
-        `    return {"task": ${JSON.stringify(title)}, "status": "ready_for_review"}`,
-      ]
-    : activeFileName.endsWith(".md")
-      ? ["", `## QuantumFlow 补全建议`, `- 任务：${title}`, "- 状态：等待 Reviewer 审查。"]
-      : [
-          "",
-          `// completed by QuantumFlow manual assistant at ${now}`,
-          "function quantumflowCompletionContext() {",
-          `  return { task: ${JSON.stringify(title)}, status: "ready_for_review" };`,
-          "}",
-        ];
+  if (els.llmPluginPrompt && !els.llmPluginPrompt.value.trim()) {
+    els.llmPluginPrompt.value = `补全当前文件中未完成的业务代码，任务目标：${title}`;
+  }
+  if (els.manualEditState) els.manualEditState.textContent = "LLM completion / running";
+  const generated = await generateWithLlmPlugin({ allowFallback: true });
+  const suffix = generated || fallbackLlmPatch(currentManualCodeContext());
   const current = els.manualCodeEditor.value.replace(/\s*$/, "");
-  els.manualCodeEditor.value = `${current}${suffix.join("\n")}\n`;
+  els.manualCodeEditor.value = `${current}\n${suffix}\n`;
   els.manualCodeEditor.focus();
   els.manualCodeEditor.scrollTop = els.manualCodeEditor.scrollHeight;
-  if (els.manualEditState) els.manualEditState.textContent = "manual completion / ready";
-  pushComment("QuantumFlow Assistant", `已为 ${activeFileName} 补全候选代码，保存后进入 Review。`, "suggestion", codeKey());
+  if (els.manualEditState) els.manualEditState.textContent = "LLM completion / ready";
+  pushComment("LLM 插件", `已为 ${activeFileName} 生成真实补全候选，保存后进入 Review。`, "suggestion", codeKey());
+}
+
+function loadLlmPluginConfig() {
+  if (!els.llmPluginProvider) return;
+  const fallback = {
+    provider: "openai",
+    model: "gpt-4.1-mini",
+    baseUrl: "https://api.openai.com/v1",
+    apiKey: "",
+  };
+  let config = fallback;
+  try {
+    config = { ...fallback, ...JSON.parse(localStorage.getItem(LLM_PLUGIN_CONFIG_KEY) || "{}") };
+  } catch {
+    config = fallback;
+  }
+  els.llmPluginProvider.value = config.provider || fallback.provider;
+  els.llmPluginModel.value = config.model || fallback.model;
+  els.llmPluginBaseUrl.value = config.baseUrl || fallback.baseUrl;
+  els.llmPluginApiKey.value = config.apiKey || "";
+}
+
+function saveLlmPluginConfig() {
+  const config = {
+    provider: els.llmPluginProvider?.value || "openai",
+    model: els.llmPluginModel?.value.trim() || "gpt-4.1-mini",
+    baseUrl: normalizeLlmBaseUrl(els.llmPluginBaseUrl?.value.trim() || "https://api.openai.com/v1"),
+    apiKey: els.llmPluginApiKey?.value.trim() || "",
+  };
+  localStorage.setItem(LLM_PLUGIN_CONFIG_KEY, JSON.stringify(config));
+  if (els.llmPluginOutput) els.llmPluginOutput.textContent = "插件配置已保存。本地保存 API Key，仅用于当前浏览器。";
+  return config;
+}
+
+function normalizeLlmBaseUrl(value) {
+  return String(value || "").replace(/\/+$/, "");
+}
+
+function currentManualCodeContext() {
+  const code = els.manualCodeEditor?.value || currentEditableCodeLines().join("\n");
+  return {
+    repo: activeRepoId,
+    file: activeFileName,
+    code,
+    prompt: els.llmPluginPrompt?.value.trim() || "",
+  };
+}
+
+function fallbackLlmPatch(context) {
+  const task = context.prompt || "补全当前手动编码任务";
+  const now = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+  if (context.file.endsWith(".py")) {
+    return [
+      "",
+      `# LLM plugin candidate generated locally at ${now}`,
+      "def quantumflow_llm_plugin_candidate():",
+      `    return {"task": ${JSON.stringify(task)}, "file": ${JSON.stringify(context.file)}, "status": "ready_for_review"}`,
+    ].join("\n");
+  }
+  return [
+    "",
+    `// LLM plugin candidate generated locally at ${now}`,
+    "function quantumflowLlmPluginCandidate() {",
+    `  return { task: ${JSON.stringify(task)}, file: ${JSON.stringify(context.file)}, status: "ready_for_review" };`,
+    "}",
+  ].join("\n");
+}
+
+async function generateWithLlmPlugin(options = {}) {
+  const config = saveLlmPluginConfig();
+  const context = currentManualCodeContext();
+  if (!context.prompt) {
+    if (els.llmPluginOutput) els.llmPluginOutput.textContent = "先输入你要模型做什么，例如：修复当前函数、补全 API、解释并生成 patch。";
+    return "";
+  }
+  if (els.llmPluginOutput) els.llmPluginOutput.textContent = "正在调用模型插件...";
+  try {
+    if (!config.baseUrl || (!config.apiKey && config.provider !== "local")) throw new Error("缺少 API Base 或 API Key");
+    const response = await fetch("/api/llm/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        provider: config.provider,
+        model: config.model,
+        base_url: config.baseUrl,
+        api_key: config.apiKey,
+        repo: context.repo,
+        file: context.file,
+        code: context.code,
+        prompt: context.prompt,
+        task_id: "manual-complete",
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : data.error?.message || "模型插件调用失败");
+    lastLlmPluginResult = data.content?.trim() || "";
+  } catch (error) {
+    lastLlmPluginResult = options.allowFallback ? fallbackLlmPatch(context) : "";
+    if (els.llmPluginOutput) {
+      els.llmPluginOutput.textContent = options.allowFallback
+        ? `插件调用未完成，已生成离线候选补丁：${error.message}`
+        : `插件调用失败：${error.message}`;
+      return lastLlmPluginResult;
+    }
+  }
+  if (els.llmPluginOutput) els.llmPluginOutput.textContent = lastLlmPluginResult || "模型没有返回内容。";
+  return lastLlmPluginResult;
+}
+
+function insertLlmPluginResult() {
+  if (!els.manualCodeEditor) return;
+  const result = lastLlmPluginResult || els.llmPluginOutput?.textContent || "";
+  if (!result || result.includes("切到手动编码后")) return;
+  const current = els.manualCodeEditor.value.replace(/\s*$/, "");
+  els.manualCodeEditor.value = `${current}\n${result}\n`;
+  els.manualCodeEditor.focus();
+  els.manualCodeEditor.scrollTop = els.manualCodeEditor.scrollHeight;
+  if (els.manualEditState) els.manualEditState.textContent = "LLM plugin / inserted";
+}
+
+function sendLlmPluginResultToReview() {
+  const result = lastLlmPluginResult || els.llmPluginOutput?.textContent || "";
+  if (!result || result.includes("切到手动编码后")) return;
+  pushComment("LLM 插件", result.slice(0, 600), "suggestion", codeKey());
+  renderLiveComments();
 }
 
 async function saveManualCodeEdit() {
@@ -2486,7 +2836,7 @@ function scheduleLocalCodexReply(text, kind, previousCodexReplyCount) {
   window.setTimeout(() => {
     const currentCodexReplyCount = adminChatMessages.filter((item) => isCodexAssistant(item.name)).length;
     if (currentCodexReplyCount <= previousCodexReplyCount) appendLocalCodexReply(text, kind);
-  }, 1200);
+  }, backendConnected ? 9000 : 1200);
 }
 
 function ensureCodexAdminPresence() {
@@ -2498,11 +2848,16 @@ function appendLocalCodexReply(text, kind) {
   const normalized = String(text || "").trim().toLowerCase();
   if (!normalized) return;
   if (!isCodexAddressed(normalized)) return;
+  const cleaned = stripCodexAddressing(text);
+  if (isProjectLearningRequest(cleaned)) {
+    startCodexProjectLearning(cleaned);
+    return;
+  }
   suppressRemoteCodexReplyUntil = Date.now() + 3000;
   appendCollaborationComment({
     id: `local-codex-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     name: "Codex",
-    text: codexKnowledgeReply(text),
+    text: codexKnowledgeReply(cleaned),
     kind: "admin_chat",
     target_key: "AI Assistant",
     votes: 0,
@@ -2513,6 +2868,13 @@ function appendLocalCodexReply(text, kind) {
 function isCodexAddressed(text) {
   const normalized = String(text || "").trim().toLowerCase();
   return ["@codex", "codex", "智能助手"].some((term) => normalized.includes(term));
+}
+
+function stripCodexAddressing(text) {
+  return String(text || "")
+    .replace(/@?codex/gi, "")
+    .replace(/智能助手/g, "")
+    .trim();
 }
 
 function handleCodexPageOperation(text) {
@@ -2580,33 +2942,114 @@ function handleRealtimeChatCleared(data = {}) {
   clearAdminChatPage("群聊页面已清空。");
 }
 
-function codexKnowledgeReply(text) {
+function textHasAny(text, terms) {
+  return terms.some((term) => text.includes(term));
+}
+
+function isProjectLearningRequest(text) {
   const normalized = String(text || "").toLowerCase();
-  if (["你好", "hello", "hi", "在吗"].some((term) => normalized.includes(term))) {
-    return `我在，并已按系统设计文档加载 QuantumFlow 知识库。${codexKnowledgeProfile.identity}`;
+  return textHasAny(normalized, ["学习整个项目", "学习项目", "预训练", "训练整个项目", "项目知识库", "索引整个项目"]);
+}
+
+async function startCodexProjectLearning(text) {
+  suppressRemoteCodexReplyUntil = Date.now() + 5000;
+  appendCollaborationComment({
+    id: `local-codex-learning-start-${Date.now()}`,
+    name: "Codex",
+    text: "可以做，但这里不是重新预训练模型权重，而是把整个项目扫描成 Codex 项目知识库/RAG 索引。我现在开始读取源码、文档和数据库结构。",
+    kind: "admin_chat",
+    target_key: "AI Assistant",
+    votes: 0,
+    status: "open",
+  });
+  try {
+    const response = await fetch("/api/codex-rag/learn-project", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 160, reason: text }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "项目学习失败");
+    appendCollaborationComment({
+      id: `local-codex-learning-done-${Date.now()}`,
+      name: "Codex",
+      text: `项目学习完成：已索引 ${result.file_count} 个文件，写入 ${result.memory_count} 条 Codex 记忆，覆盖源码、前端页面、设计文档和 SQLite 表结构。之后你问架构、接口、页面、数据库或 Agent 分工时，我会从这些项目记忆里检索上下文再回答。说明：这是项目级 RAG/上下文注入，不是真正重训模型。`,
+      kind: "admin_chat",
+      target_key: "AI Assistant",
+      votes: 0,
+      status: "open",
+    });
+  } catch (error) {
+    appendCollaborationComment({
+      id: `local-codex-learning-failed-${Date.now()}`,
+      name: "Codex",
+      text: `项目学习没有完成：${error.message || "未知错误"}。可以先确认后端服务是否在 127.0.0.1:8765 正常运行。`,
+      kind: "admin_chat",
+      target_key: "AI Assistant",
+      votes: 0,
+      status: "open",
+    });
   }
-  if (["架构", "系统", "分层", "control", "plane", "master", "slave", "pulsar", "redis", "vector", "graph", "k8s"].some((term) => normalized.includes(term))) {
+}
+
+function codexKnowledgeReply(text) {
+  const cleaned = stripCodexAddressing(text);
+  const normalized = cleaned.toLowerCase();
+  const arithmetic = answerSimpleArithmetic(cleaned);
+  if (arithmetic) return arithmetic;
+  if (isProjectLearningRequest(cleaned)) {
+    return "可以。我会把它做成项目级 RAG/上下文索引：扫描源码、文档和数据库结构，写入 Codex 记忆。严格说这不是模型预训练，而是让当前 Codex 在回答时检索整个项目上下文。";
+  }
+  if (!normalized) return "我在。你可以直接问我问题，也可以让我看当前页面、解释代码、生成补丁或接入模型插件。";
+  if (textHasAny(normalized, ["你好", "hello", "hi", "在吗"])) {
+    return "我在。你直接问就行，我会先回答问题本身；只有你问 QuantumFlow 架构、Agent 分工或交付流程时，我才切回系统设计文档。";
+  }
+  if (textHasAny(normalized, ["你是谁", "你能干什么", "能做什么", "会什么", "介绍一下你"])) {
+    return "我是这个 QuantumFlow 桌面里的 Codex 助手。这里我主要能做三类事：回答开发问题，帮你改页面/写代码/查 bug，以及把当前代码区的内容交给 Agent 或大模型插件生成候选补丁。";
+  }
+  if (textHasAny(normalized, ["deepseek", "deep seek", "深度求索"])) {
+    return "知道。DeepSeek 是一家做大模型的团队/产品线，比较常被开发者关注的是它的推理模型和代码模型能力，以及 OpenAI-compatible API 接入方式。放到你这个页面里，可以把它作为“手动编码”的模型插件：填 DeepSeek 的 API Base、Key 和模型名，然后让它基于当前文件生成补丁或解释代码。";
+  }
+  if (textHasAny(normalized, ["openai", "gpt", "claude", "qwen", "通义", "gemini", "ollama", "本地模型", "大模型", "llm"])) {
+    return "可以接。这个手动编码面板适合按 OpenAI-compatible 协议接模型：API Base、API Key、模型名和提示词四项就够了。云模型适合质量优先，本地/Ollama 适合隐私和离线开发，生成结果再进入代码区和 Review。";
+  }
+  if (textHasAny(normalized, ["为什么", "怎么", "如何", "哪里", "哪个", "什么", "吗", "嘛", "？", "?"])) {
+    return `我理解你的问题是：“${cleaned}”。这不是 QuantumFlow 设计文档里的固定条目，我先按普通助手回答：你可以把具体对象、报错或目标再补一句，我会直接给结论、原因和可执行改法，不再套任务拆解模板。`;
+  }
+  if (textHasAny(normalized, ["架构", "系统", "分层", "control", "plane", "master", "slave", "pulsar", "redis", "vector", "graph", "k8s"])) {
     return codexKnowledgeProfile.architecture;
   }
-  if (["codex", "后端", "api", "数据库", "事务", "权重"].some((term) => normalized.includes(term))) {
+  if (textHasAny(normalized, ["codex", "后端", "api", "数据库", "事务", "权重"])) {
     return codexKnowledgeProfile.codex;
   }
-  if (["rag", "skill", "提示词", "系统提示", "预训练", "训练", "知识库", "context"].some((term) => normalized.includes(term))) {
+  if (textHasAny(normalized, ["rag", "skill", "提示词", "系统提示", "预训练", "训练", "知识库", "context"])) {
     return `${codexKnowledgeProfile.llm} 这次我做的是工程化知识注入：把文档蒸馏成助手上下文和回复规则，而不是重新训练模型权重。`;
   }
-  if (["自愈", "gap", "测试", "qa", "错误", "修复", "路由", "插桩"].some((term) => normalized.includes(term))) {
+  if (textHasAny(normalized, ["自愈", "gap", "测试", "qa", "错误", "修复", "路由", "插桩"])) {
     return codexKnowledgeProfile.quality;
   }
-  if (["流程", "交付", "步骤", "闭环", "沙箱", "git", "环境"].some((term) => normalized.includes(term))) {
+  if (textHasAny(normalized, ["流程", "交付", "步骤", "闭环", "沙箱", "git", "环境"])) {
     return codexKnowledgeProfile.workflow;
   }
-  if (["投票", "仲裁", "human", "否决", "gemini", "opencode"].some((term) => normalized.includes(term))) {
+  if (textHasAny(normalized, ["投票", "仲裁", "human", "否决", "gemini", "opencode"])) {
     return codexKnowledgeProfile.api;
   }
-  if (["愿景", "社区", "开源", "github", "未来"].some((term) => normalized.includes(term))) {
+  if (textHasAny(normalized, ["愿景", "社区", "开源", "github", "未来"])) {
     return codexKnowledgeProfile.vision;
   }
-  return `收到。按 QuantumFlow 设计文档，我会先把问题拆成目标、上下文、执行 Agent、沙箱验证和验收标准五项；涉及后端/API/数据库时由 Codex 主导，涉及 UI 交互时交给 Gemini/前端 Agent，并由 Master 仲裁。`;
+  return `收到：${cleaned}。我会按普通问题处理，不再强行套 QuantumFlow 流程。你可以继续补充目标、代码片段或报错，我会直接给答案和改法。`;
+}
+
+function answerSimpleArithmetic(text) {
+  const expression = String(text || "").replace(/[=？?]/g, "").trim();
+  if (!expression || !/^[\d+\-*/().\s]+$/.test(expression) || !/[+\-*/]/.test(expression)) return "";
+  try {
+    const value = Function(`"use strict"; return (${expression});`)();
+    if (Number.isFinite(value)) return String(value);
+  } catch {
+    return "";
+  }
+  return "";
 }
 
 async function loadRealtimeChatHistory() {
@@ -2850,6 +3293,7 @@ function applySnapshot(snapshot) {
   const incomingTasks = snapshot.tasks || [];
   const incomingEvents = snapshot.events || [];
   backendQueueStats = snapshot.queue || backendQueueStats;
+  projectDeliveries = Array.isArray(snapshot.deliveries) ? snapshot.deliveries : projectDeliveries;
 
   incomingAgents.forEach((incoming) => {
     const agent = agentById(incoming.id);
@@ -2928,7 +3372,7 @@ function runTask(index = currentTaskIndex + 1) {
   window.setTimeout(() => {
     if (task.status !== "active") return;
     setAgent(owner.id, { status: "working" });
-    addLog("开始执行，写入任务事件并更新战情室状态。", owner.name);
+    addLog("开始执行，写入任务事件并更新调度中枢状态。", owner.name);
   }, 950);
 
   window.setTimeout(() => {
@@ -3204,10 +3648,14 @@ async function loadRealtimeServiceStatus() {
   try {
     const response = await fetch(`/api/realtime/status?t=${Date.now()}`);
     const data = await response.json();
+    if (Array.isArray(data.online)) renderOnlineCollaborators(data.online);
+    const virtual = data.virtual_network || {};
     if (els.networkFacts) {
       els.networkFacts.innerHTML = `
         <div><span>本机 WebSocket</span><code>${escapeHtml(data.local_ws || "-")}</code></div>
         <div><span>局域网 WebSocket</span><code>${escapeHtml(data.lan_ws || "-")}</code></div>
+        <div><span>虚拟网络 ID</span><code>${escapeHtml(virtual.network_id || "-")}</code></div>
+        <div><span>虚拟网络状态</span><code>${escapeHtml(virtual.status || "offline")}${virtual.assigned_ips?.length ? ` / ${escapeHtml(virtual.assigned_ips.join(", "))}` : ""}</code></div>
         <div><span>实时频道</span><code>${escapeHtml((data.channels || []).join(" / "))}</code></div>
         <div><span>在线连接</span><code>${escapeHtml(String(data.online_count || 0))} online</code></div>
       `;
@@ -3246,6 +3694,7 @@ function renderAll() {
   renderAgentStrip();
   renderTasks();
   updateMetrics();
+  renderRuntimeEnvironment();
   renderCommunity();
 }
 
@@ -3256,6 +3705,14 @@ els.pauseBtn.addEventListener("click", () => {
   paused = !paused;
   els.pauseBtn.textContent = paused ? "▶" : "⏸";
   addLog(paused ? "调度已暂停。" : "调度已继续。", "System");
+});
+els.runtimeProjectTestBtn?.addEventListener("click", () => testProjectDelivery(getActiveRuntimeDelivery()?.id));
+els.runtimeProjectOpenBtn?.addEventListener("click", () => openProjectDeliveryRuntime(getActiveRuntimeDelivery()?.id));
+els.runtimeProjectFixBtn?.addEventListener("click", () => requestProjectDeliveryFix(getActiveRuntimeDelivery()?.id));
+els.runtimePreviewRefreshBtn?.addEventListener("click", () => {
+  const url = els.runtimeProjectFrame?.src || "";
+  if (!url) return;
+  els.runtimeProjectFrame.src = url;
 });
 els.taskForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -3291,6 +3748,7 @@ els.publicWorldChatForm?.addEventListener("submit", sendPublicChat);
 els.oswNewRepoForm?.addEventListener("submit", createPublicRepo);
 els.adminApiForm?.addEventListener("submit", addAdminApi);
 els.adminMemberForm?.addEventListener("submit", addAdminMember);
+els.adminMemberUserId?.addEventListener("input", scheduleAdminUserLookup);
 els.adminMemberRole?.addEventListener("change", () => syncPermissionPicker());
 document.querySelectorAll("[data-admin-permission-toggle]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -3334,6 +3792,9 @@ document.querySelectorAll("[data-profile-tab]").forEach((button) => {
 document.querySelectorAll("[data-world-panel-target]").forEach((button) => {
   button.addEventListener("click", () => switchOpenWorldPanel(button.dataset.worldPanelTarget));
 });
+document.querySelectorAll("[data-runtime-open-view]").forEach((button) => {
+  button.addEventListener("click", () => openRuntimeFeature(button));
+});
 els.openSourceWorldView?.addEventListener("click", handleOpenSourceClick);
 document.querySelectorAll("[data-osw-action]").forEach((button) => {
   button.addEventListener("click", () => handleOpenSourceAction(button.dataset.oswAction));
@@ -3349,6 +3810,10 @@ els.manualEditBtn?.addEventListener("click", () => setManualEditMode(true));
 els.manualCompleteBtn?.addEventListener("click", completeManualCode);
 els.manualCancelBtn?.addEventListener("click", () => setManualEditMode(false));
 els.manualSaveBtn?.addEventListener("click", saveManualCodeEdit);
+els.llmPluginSaveBtn?.addEventListener("click", saveLlmPluginConfig);
+els.llmPluginGenerateBtn?.addEventListener("click", generateWithLlmPlugin);
+els.llmPluginInsertBtn?.addEventListener("click", insertLlmPluginResult);
+els.llmPluginReviewBtn?.addEventListener("click", sendLlmPluginResultToReview);
 document.querySelectorAll("[data-coding-mode]").forEach((button) => {
   button.addEventListener("click", () => switchCodingMode(button.dataset.codingMode));
 });
@@ -3516,7 +3981,7 @@ async function submitWorkspaceTask(event) {
   workspaceMessages.push({
     name: "Codex",
     role: "Pair Agent",
-    text: `我会参与讨论，并把任务交给 ${agentById(owner)?.name || owner}。建议先确认验收标准，再让战情室自动编码。`,
+    text: `我会参与讨论，并把任务交给 ${agentById(owner)?.name || owner}。建议先确认验收标准，再让调度中枢自动编码。`,
   });
   workspaceCodeEvents.push(`dispatch/${owner} :: ${title}`);
   els.workspaceTaskInput.value = "";
@@ -3562,8 +4027,48 @@ function avatarInitial(name) {
   return clean.slice(0, 1).toUpperCase();
 }
 
+function realOnlineCollaboratorRows() {
+  const source = publicWorldOnlinePeers.length
+    ? publicWorldOnlinePeers
+    : [{ id: collaboratorClientId, name: currentUser?.display_name || collaboratorName, role: currentUser?.role || "Developer", status: "online" }];
+  const merged = source.some((peer) => String(peer.id || "").toLowerCase() === codexAssistantPeer.id)
+    ? source
+    : [codexAssistantPeer, ...source];
+  return merged
+    .filter((peer) => peer.kind !== "virtual_network")
+    .map((peer, index) => ({
+      id: peer.id || `online-${index}`,
+      name: repairMojibake(peer.name || "Developer"),
+      role: repairMojibake(peer.role || "Developer"),
+      kind: peer.kind || "developer",
+      color: peer.color || (peer.kind === "assistant" ? "#2fe098" : "#21d6e7"),
+      source: repairMojibake(peer.source || peer.ip || peer.host || "LAN / WebSocket"),
+      status: repairMojibake(peer.status || "online"),
+    }));
+}
+
+function renderSourceOnlineCollaborators(rows = realOnlineCollaboratorRows()) {
+  if (!els.peopleList) return;
+  if (els.onlineCount) els.onlineCount.textContent = String(rows.length);
+  if (els.onlineMiniCount) els.onlineMiniCount.textContent = String(rows.length);
+  els.peopleList.innerHTML = rows.length
+    ? rows
+        .map(
+          (item) => `
+      <div class="person-item ${escapeHtml(statusClass(item.status))}">
+        <i style="background:${escapeHtml(item.color)}">${escapeHtml(avatarInitial(item.name))}</i>
+        <span><strong>${escapeHtml(item.name)}</strong><em>${escapeHtml(item.role)} / ${escapeHtml(item.source)}</em></span>
+        <b>${escapeHtml(item.status || "online")}</b>
+      </div>
+    `,
+        )
+        .join("")
+    : '<div class="history-empty">暂无真实在线协作者</div>';
+}
+
 function renderOnlineCollaborators(peers = []) {
-  const sourcePeers = peers.length ? peers : [{ id: collaboratorClientId, name: collaboratorName, role: "Developer" }];
+  const memberPeers = peers.filter((peer) => peer.kind !== "virtual_network");
+  const sourcePeers = memberPeers.length ? memberPeers : [{ id: collaboratorClientId, name: collaboratorName, role: "Developer" }];
   const mergedPeers = sourcePeers.some((peer) => String(peer.id || "").toLowerCase() === codexAssistantPeer.id)
     ? sourcePeers
     : [codexAssistantPeer, ...sourcePeers];
@@ -3573,11 +4078,14 @@ function renderOnlineCollaborators(peers = []) {
     role: repairMojibake(peer.role || "Developer"),
     ip: repairMojibake(peer.ip || ""),
     host: repairMojibake(peer.host || ""),
+    source: repairMojibake(peer.source || ""),
+    status: repairMojibake(peer.status || "online"),
   }));
   publicWorldOnlinePeers = onlinePeers;
   if (els.adminChatOnline) els.adminChatOnline.textContent = `${onlinePeers.length} online`;
   if (els.onlineCount) els.onlineCount.textContent = String(onlinePeers.length);
   if (els.onlineMiniCount) els.onlineMiniCount.textContent = String(onlinePeers.length);
+  renderSourceOnlineCollaborators(onlinePeers);
   renderAdminOnlineDevelopers();
   renderPublicWorldOnline();
   renderWorkspaceOnline();
@@ -3605,11 +4113,11 @@ function renderAdminOnlineDevelopers() {
   els.adminOnlineList.innerHTML = rows
     .map(
       (item) => `
-      <div class="admin-online-person">
+      <div class="admin-online-person ${escapeHtml(statusClass(item.status))}">
         <i style="--avatar:${item.color}">${escapeHtml(avatarInitial(item.name))}</i>
         <span>
           <strong>${escapeHtml(item.name)}</strong>
-          <em>${escapeHtml(item.role)} 路 ${escapeHtml(item.source)}</em>
+          <em>${escapeHtml(item.role)} / ${escapeHtml(item.source)}</em>
         </span>
         <b>${escapeHtml(item.status || "online")}</b>
       </div>
@@ -3627,7 +4135,7 @@ function renderAdminOverviewRealtime(rows = []) {
           .slice(0, 6)
           .map(
             (item) => `
-              <div class="admin-online-person">
+              <div class="admin-online-person ${escapeHtml(statusClass(item.status))}">
                 <i style="--avatar:${item.color}">${escapeHtml(avatarInitial(item.name))}</i>
                 <span><strong>${escapeHtml(item.name)}</strong><em>${escapeHtml(item.role)} / ${escapeHtml(item.source)}</em></span>
                 <b>${escapeHtml(item.status || "online")}</b>
@@ -3655,20 +4163,28 @@ function renderPublicWorldOnline() {
     ? publicWorldOnlinePeers
     : [{ id: collaboratorClientId, name: collaboratorName, role: "Developer" }];
   const rows = peers;
-  if (els.publicWorldOnlineCount) els.publicWorldOnlineCount.textContent = `${rows.length} online`;
-  if (els.publicWorldOnlineTotal) els.publicWorldOnlineTotal.textContent = String(rows.length);
+  const onlineTotal = rows.filter((item) => String(item.status || "online").toLowerCase() === "online").length;
+  if (els.publicWorldOnlineCount) els.publicWorldOnlineCount.textContent = `${onlineTotal}/${rows.length} online`;
+  if (els.publicWorldOnlineTotal) els.publicWorldOnlineTotal.textContent = String(onlineTotal);
   els.publicWorldOnlineList.innerHTML = rows
     .map((item) => {
       const color = item.color || "#21d6e7";
       return `
-        <div class="osw-online-person">
+        <div class="osw-online-person ${escapeHtml(statusClass(item.status))}">
           <i style="--avatar:${color}">${escapeHtml(avatarInitial(item.name))}</i>
-          <span><strong>${escapeHtml(item.name)}</strong><em>${escapeHtml(item.role || "Developer")}</em></span>
-          <b></b>
+          <span><strong>${escapeHtml(item.name)}</strong><em>${escapeHtml(item.role || "Developer")} / ${escapeHtml(item.source || item.ip || "WebSocket")}</em></span>
+          <b>${escapeHtml(item.status || "online")}</b>
         </div>
       `;
     })
     .join("");
+}
+
+function statusClass(status) {
+  const value = String(status || "online").toLowerCase();
+  if (value.includes("offline") || value.includes("离线")) return "is-offline";
+  if (value.includes("denied") || value.includes("待授权")) return "is-pending";
+  return "is-online";
 }
 
 function sendAdminChat(event) {
@@ -3678,6 +4194,21 @@ function sendAdminChat(event) {
   if (!text) return;
   if (handleCodexPageOperation(text)) {
     els.adminChatInput.value = "";
+    return;
+  }
+  const cleanedCodexText = stripCodexAddressing(text);
+  if (isCodexAddressed(text) && isProjectLearningRequest(cleanedCodexText)) {
+    appendCollaborationComment({
+      id: `local-user-learning-${Date.now()}`,
+      name: currentUser?.display_name || collaboratorName,
+      text,
+      kind: "admin_chat",
+      target_key: currentUser?.role || "Developer",
+      votes: 1,
+      status: "open",
+    });
+    els.adminChatInput.value = "";
+    startCodexProjectLearning(cleanedCodexText);
     return;
   }
   pushRealtimeChat(currentUser?.display_name || collaboratorName, text, "admin_chat", currentUser?.role || "Developer");
@@ -3803,6 +4334,49 @@ async function deleteAdminApi(id) {
   loadAdminApis();
 }
 
+function setAdminLookupState(message, tone = "") {
+  if (!els.adminMemberLookupState) return;
+  els.adminMemberLookupState.textContent = message;
+  els.adminMemberLookupState.dataset.tone = tone;
+}
+
+function scheduleAdminUserLookup() {
+  window.clearTimeout(adminLookupTimer);
+  selectedAdminUser = null;
+  if (els.adminMemberName) els.adminMemberName.value = "";
+  const userId = els.adminMemberUserId?.value.trim() || "";
+  if (!userId) {
+    setAdminLookupState("输入 ID 后自动匹配姓名");
+    return;
+  }
+  setAdminLookupState("正在匹配用户...", "pending");
+  adminLookupTimer = window.setTimeout(() => lookupAdminUserById(userId), 350);
+}
+
+async function lookupAdminUserById(userId) {
+  if (!/^\d+$/.test(String(userId || ""))) {
+    setAdminLookupState("用户 ID 只能是数字", "warn");
+    return;
+  }
+  try {
+    const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}`, { headers: authHeaders() });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "未找到该用户");
+    selectedAdminUser = data.user;
+    const displayName = selectedAdminUser.display_name || selectedAdminUser.username || `User ${selectedAdminUser.id}`;
+    if (els.adminMemberName) els.adminMemberName.value = displayName;
+    if (els.adminMemberRole && selectedAdminUser.role) {
+      els.adminMemberRole.value = selectedAdminUser.role;
+      syncPermissionPicker(selectedAdminUser.role);
+    }
+    setAdminLookupState(`已匹配：${displayName} / ${selectedAdminUser.username || "-"} / ${selectedAdminUser.role || "Developer"}`, "ok");
+  } catch (error) {
+    selectedAdminUser = null;
+    if (els.adminMemberName) els.adminMemberName.value = "";
+    setAdminLookupState(error.message || "未找到该用户", "warn");
+  }
+}
+
 async function loadAdminMembers() {
   if (!els.adminMemberList) return;
   try {
@@ -3814,11 +4388,14 @@ async function loadAdminMembers() {
             (item) => {
               const displayStatus = isNameOnline(item.name) ? "online" : item.status;
               const displayRole = onlineRoleForName(item.name) || item.role;
+              const accountLine = item.user_id
+                ? `用户 #${item.user_id} · ${item.username || item.display_name || item.name}`
+                : "未绑定系统用户";
               return `
             <div class="admin-row-item">
               <span>
                 <strong>${escapeHtml(item.name)}</strong>
-                <em>${escapeHtml(displayRole)} / ${escapeHtml(displayStatus)} / ${escapeHtml(item.project_scope || "QuantumFlow Core")}</em>
+                <em>${escapeHtml(accountLine)} / ${escapeHtml(displayRole)} / ${escapeHtml(displayStatus)} / ${escapeHtml(item.project_scope || "QuantumFlow Core")}</em>
                 <small>${renderPermissionBadges(item.permissions || {})}</small>
               </span>
               <button type="button" data-delete-member="${item.id}">删除</button>
@@ -3872,7 +4449,7 @@ function defaultPermissionsForRole(role) {
 
 function permissionLabels() {
   return {
-    war_room: "战情室",
+    war_room: "调度中枢",
     source_world: "开源世界",
     workspace: "项目房间",
     api_registry: "接口",
@@ -3905,24 +4482,48 @@ function renderPermissionBadges(permissions) {
 
 async function addAdminMember(event) {
   event.preventDefault();
-  const name = els.adminMemberName?.value.trim();
-  if (!name) return;
+  const userId = els.adminMemberUserId?.value.trim() || "";
+  let name = els.adminMemberName?.value.trim();
+  if (!userId) {
+    setAdminLookupState("请先输入用户 ID，再进行授权。", "warn");
+    return;
+  }
+  if (!selectedAdminUser || String(selectedAdminUser.id) !== userId || !name) {
+    await lookupAdminUserById(userId);
+    name = els.adminMemberName?.value.trim();
+  }
+  if (!selectedAdminUser || !name) {
+    setAdminLookupState("没有匹配到用户，不能授权。", "warn");
+    return;
+  }
   const role = els.adminMemberRole?.value || "Developer";
   const response = await fetch("/api/admin/members", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({
+      user_id: Number(userId),
       name,
       role,
       project_scope: els.adminMemberProject?.value.trim() || "QuantumFlow Core",
       permissions: currentAdminPermissions(),
     }),
   });
+  const result = await response.json().catch(() => ({}));
   if (response.ok) {
+    if (currentUser && Number(currentUser.id) === Number(userId)) {
+      currentUser = { ...currentUser, ...(result.user || {}), role: result.user?.role || role };
+      storeAuthSession(authToken, currentUser);
+      renderProfile();
+    }
+    if (els.adminMemberUserId) els.adminMemberUserId.value = "";
     els.adminMemberName.value = "";
     if (els.adminMemberProject) els.adminMemberProject.value = "";
+    selectedAdminUser = null;
+    setAdminLookupState("已授权并同步到用户账号。", "ok");
     syncPermissionPicker(role);
     loadAdminMembers();
+  } else {
+    setAdminLookupState(result.detail || "授权失败", "warn");
   }
 }
 
@@ -4346,12 +4947,14 @@ function switchView(view) {
   closeAllToolWindows();
   closeBotChatWindow();
   closeAgentQuickPanel();
-  const targetView = ["warRoom", "community", "openSourceWorld", "developerAdmin", "profile", "projectRoom"].includes(view) ? view : "warRoom";
+  const targetView = ["warRoom", "runtimeEnvironment", "community", "openSourceWorld", "developerAdmin", "profile", "projectRoom"].includes(view) ? view : "warRoom";
+  const runtimeEnvironmentMode = targetView === "runtimeEnvironment";
   const platformMode = targetView === "community";
   const openSourceMode = targetView === "openSourceWorld";
   const adminMode = targetView === "developerAdmin";
   const profileMode = targetView === "profile";
   const projectRoomMode = targetView === "projectRoom";
+  document.body.classList.toggle("runtime-environment-mode", runtimeEnvironmentMode);
   document.body.classList.toggle("platform-mode", platformMode);
   document.body.classList.toggle("open-source-mode", openSourceMode);
   document.body.classList.toggle("admin-mode", adminMode);
@@ -4359,12 +4962,14 @@ function switchView(view) {
   document.body.classList.toggle("project-room-mode", projectRoomMode);
   document.querySelectorAll(".tab-button").forEach((item) => item.classList.toggle("active", item.dataset.view === targetView));
   els.warRoomView.classList.toggle("active", targetView === "warRoom");
+  els.runtimeEnvironmentView?.classList.toggle("active", runtimeEnvironmentMode);
   els.communityView.classList.toggle("active", platformMode);
   els.openSourceWorldView?.classList.toggle("active", openSourceMode);
   els.profileView?.classList.toggle("active", profileMode);
   els.developerAdminView?.classList.toggle("active", adminMode);
   els.projectRoomView?.classList.toggle("active", projectRoomMode);
   els.warRoomView.hidden = targetView !== "warRoom";
+  if (els.runtimeEnvironmentView) els.runtimeEnvironmentView.hidden = !runtimeEnvironmentMode;
   els.communityView.hidden = !platformMode;
   if (els.openSourceWorldView) els.openSourceWorldView.hidden = !openSourceMode;
   if (els.profileView) els.profileView.hidden = !profileMode;
@@ -4376,9 +4981,22 @@ function switchView(view) {
       ? "开源世界"
       : platformMode
         ? "源文明"
-        : "QuantumFlow 调度中枢";
+        : runtimeEnvironmentMode
+          ? "运行环境"
+          : "QuantumFlow 调度中枢";
   if (profileMode) els.pageTitle.textContent = "用户信息中心";
   if (projectRoomMode) els.pageTitle.textContent = "项目房间";
+  if (els.taskInput) {
+    els.taskInput.placeholder = runtimeEnvironmentMode ? "添加运行环境测试 / 页面报错" : "添加开发任务 / 外部消息";
+  }
+  if (els.taskForm) {
+    const submitButton = els.taskForm.querySelector('button[type="submit"]');
+    if (submitButton) submitButton.textContent = runtimeEnvironmentMode ? "记录" : "添加";
+  }
+  if (runtimeEnvironmentMode && els.runtimeQueueMetric) {
+    els.runtimeQueueMetric.textContent = `${backendQueueStats.pending || 0}/${backendQueueStats.active || 0}`;
+    renderRuntimeEnvironment();
+  }
   if (platformMode) {
     if (location.protocol !== "file:") history.replaceState(null, "", "/platform");
     stopAdminChatPreview();
@@ -4411,6 +5029,9 @@ function switchView(view) {
     if (location.protocol !== "file:") history.replaceState(null, "", "/project-room");
     stopAdminChatPreview();
     renderProjectRoomPage();
+  } else if (runtimeEnvironmentMode) {
+    if (location.protocol !== "file:") history.replaceState(null, "", "/runtime-environment");
+    stopAdminChatPreview();
   } else {
     if (location.protocol !== "file:" && !isAuthRoute()) history.replaceState(null, "", "/war-room");
     stopAdminChatPreview();
@@ -4930,19 +5551,26 @@ async function setupDesktopZoomControl() {
   const zoomOut = document.getElementById("desktopZoomOutBtn");
   const zoomIn = document.getElementById("desktopZoomInBtn");
   if (!valueNode || !window.quantumflowDesktop?.getZoom || !window.quantumflowDesktop?.setZoom) return;
+  const zoomStorageKey = "qfDesktopZoomFactor";
 
   const render = (factor) => {
-    valueNode.textContent = `${Math.round(Number(factor || 0.9) * 100)}%`;
+    valueNode.textContent = `${Math.round(Number(factor || 1) * 100)}%`;
   };
   let currentZoom = await window.quantumflowDesktop.getZoom();
+  const savedZoom = Number(localStorage.getItem(zoomStorageKey) || "");
+  if (Number.isFinite(savedZoom) && savedZoom >= 0.6 && savedZoom <= 1.4) {
+    currentZoom = await window.quantumflowDesktop.setZoom(savedZoom);
+  }
   render(currentZoom);
   window.quantumflowDesktop.onZoomChanged?.((factor) => {
     currentZoom = factor;
+    localStorage.setItem(zoomStorageKey, String(currentZoom));
     render(currentZoom);
   });
 
   const setZoom = async (delta) => {
-    currentZoom = await window.quantumflowDesktop.setZoom(Number(currentZoom || 0.9) + delta);
+    currentZoom = await window.quantumflowDesktop.setZoom(Number(currentZoom || 1) + delta);
+    localStorage.setItem(zoomStorageKey, String(currentZoom));
     render(currentZoom);
     addLog(`桌面缩放已固定为 ${Math.round(currentZoom * 100)}%。`, "System");
   };
@@ -5007,17 +5635,21 @@ renderAdminChat();
 renderOnlineCollaborators();
 window.quantumflowStreamCodeLines = streamCodeLines;
 globalThis.quantumflowStreamCodeLines = streamCodeLines;
-addLog("QuantumFlow 桌面战情室 MVP 已启动。", "System");
+addLog("QuantumFlow 桌面调度中枢 MVP 已启动。", "System");
+const initialDesktopView = new URLSearchParams(location.search).has("desktop") && location.pathname.includes("platform") ? "warRoom" : "";
 switchView(
-  location.pathname.includes("admin")
+  initialDesktopView ||
+  (location.pathname.includes("admin")
     ? "developerAdmin"
     : location.pathname.includes("open-source")
       ? "openSourceWorld"
       : location.pathname.includes("platform")
         ? "community"
-        : location.pathname.includes("profile")
-          ? "profile"
-          : "warRoom",
+        : location.pathname.includes("runtime-environment")
+          ? "runtimeEnvironment"
+          : location.pathname.includes("profile")
+            ? "profile"
+            : "warRoom"),
 );
 if (location.pathname.includes("register")) showAuthView("register", false);
 else if (location.pathname.includes("forgot-password")) showAuthView("forgot", false);

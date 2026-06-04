@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>QuantumFlow Desktop</title>
-    <link rel="stylesheet" href="/styles.css?v=20260603-codex-after-user" />
+    <link rel="stylesheet" href="/styles.css?v=20260604-runtime-open-external" />
   </head>
   <body class="auth-mode">
     <header class="desktop-chrome" id="desktopChrome" aria-label="QuantumFlow desktop titlebar">
@@ -103,7 +103,7 @@
           <button class="team-card active">
             <span class="live-dot"></span>
             <span>
-              <strong>OpenClaw 多智能体开发队</strong>
+              <strong>QuantumFlow 多智能体开发队</strong>
               <small>桌面端 MVP / 可视化调度</small>
             </span>
           </button>
@@ -136,7 +136,8 @@
             <h1 id="pageTitle">QuantumFlow 调度中枢</h1>
           </div>
           <div class="top-actions">
-            <button class="tab-button active" data-view="warRoom">战情室</button>
+            <button class="tab-button active" data-view="warRoom">调度中枢</button>
+            <button class="tab-button" data-view="runtimeEnvironment">运行环境</button>
             <button class="tab-button" data-view="community">源文明</button>
             <button class="tab-button" data-view="openSourceWorld">开源世界</button>
             <button class="tab-button locked" data-view="developerAdmin">开发者管理中心</button>
@@ -216,6 +217,75 @@
           </div>
         </section>
 
+        <section class="runtime-environment-view view-panel" id="runtimeEnvironmentView" hidden>
+          <div class="runtime-cockpit">
+            <header class="runtime-cockpit-head">
+              <div>
+                <span>Runtime Testbed</span>
+                <h2>项目运行环境</h2>
+                <p>这里直接跑项目、看网页、测接口，并把失败日志回传给 Agent 纠错。</p>
+              </div>
+              <div class="runtime-cockpit-status">
+                <b id="runtimeProjectStatus">等待项目交付</b>
+                <strong id="runtimeQueueMetric">0</strong>
+                <span>队列 pending / active</span>
+              </div>
+            </header>
+
+            <section class="runtime-cockpit-body">
+              <div class="runtime-floating-actions">
+                <div class="runtime-primary-actions">
+                  <button type="button" id="runtimeProjectOpenBtn">打开项目网页</button>
+                  <button type="button" id="runtimeProjectTestBtn">测试运行环境</button>
+                  <button type="button" id="runtimeProjectFixBtn">请求 Agent 纠错</button>
+                </div>
+                <div class="runtime-nav-actions">
+                  <button type="button" data-runtime-open-view="warRoom">调度中枢</button>
+                  <button type="button" data-runtime-open-view="community" data-runtime-world-panel="codePanel">源文明代码区</button>
+                  <button type="button" data-runtime-open-view="community" data-runtime-world-panel="issuesPanel">需求 / Issue</button>
+                  <button type="button" data-runtime-open-view="developerAdmin" data-runtime-admin-panel="adminOverviewPanel">开发者管理</button>
+                </div>
+              </div>
+              <main class="runtime-live-surface">
+                <div class="runtime-live-toolbar">
+                  <div class="runtime-live-dots"><b></b><b></b><b></b></div>
+                  <div class="runtime-live-address" id="runtimePreviewAddress">等待项目 Web UI 启动</div>
+                  <button type="button" id="runtimePreviewRefreshBtn">刷新</button>
+                </div>
+                <div class="runtime-live-frame">
+                  <iframe id="runtimeProjectFrame" title="项目网页预览" loading="lazy"></iframe>
+                  <div class="runtime-live-empty" id="runtimePreviewEmpty">
+                    <span>Project Web UI</span>
+                    <strong>打开项目网页后会显示在这里</strong>
+                    <p>下方点击“打开项目网页”启动本地服务；预览区用于检查页面布局、交互和运行报错。</p>
+                  </div>
+                </div>
+              </main>
+
+              <aside class="runtime-control-dock">
+                <section class="runtime-project-summary">
+                  <span>Current Project</span>
+                  <h3 id="runtimeProjectTitle">暂无可运行项目</h3>
+                  <p id="runtimeProjectOutput">项目交付完成后，这里会联动测试运行环境、打开网页界面，并把失败日志送回 Agent 纠错。</p>
+                </section>
+
+                <section class="runtime-action-stack">
+                </section>
+
+                <section class="runtime-mini-nav">
+                  <span>Quick Switch</span>
+                </section>
+              </aside>
+            </section>
+
+            <footer class="runtime-cockpit-foot">
+              <article><span>Web UI</span><strong>Preview</strong><em>可视化页面测试</em></article>
+              <article><span>Connector</span><strong>4</strong><em>planned channels</em></article>
+              <article><span>知识库</span><strong>on</strong><em>project RAG ready</em></article>
+            </footer>
+          </div>
+        </section>
+
         <section class="community-view view-panel" id="communityView">
           <div class="open-world qf-world">
             <aside class="qf-rail">
@@ -258,7 +328,7 @@
 
               <section class="qf-board">
                 <div class="qf-issue-panel">
-                  <div class="qf-panel-head"><h3>内部任务 / Issues</h3><span>来自 Connector、战情室和手动创建</span></div>
+                  <div class="qf-panel-head"><h3>内部任务 / Issues</h3><span>来自 Connector、调度中枢和手动创建</span></div>
                   <div class="issue-strip" id="communityIssues"></div>
                 </div>
                 <div class="qf-connector-panel">
@@ -307,40 +377,59 @@
                         <button id="manualCancelBtn" type="button" hidden>取消</button>
                       </div>
                     </div>
-                    <section class="auto-code-panel active" id="autoCodePanel">
-                      <div class="auto-code-brand"><strong>Agent 编排控制台</strong><button type="button" data-coding-mode="manual" title="切到手动编码">×</button></div>
-                      <div class="auto-code-hero">
-                        <div class="auto-code-icon">FLOW</div>
-                        <h3>把需求交给多智能体流水线</h3>
-                        <p>任务会先进入 Master 仲裁，再交给对应 Agent 编码、测试、审查和回写。</p>
-                      </div>
-                      <div class="auto-code-points">
-                        <span>Master 判断任务归属和执行顺序</span>
-                        <span>Agent 输出代码后进入 Review 门禁</span>
-                        <span>结果写入代码区，评论区继续投票修正</span>
-                      </div>
-                      <div class="auto-agent-grid" aria-label="选择 Agent">
-                        <button class="active frontend-agent" type="button" data-auto-agent="frontend"><i>UI</i><strong>前端 Agent</strong><span>界面 / 交互</span></button>
-                        <button class="backend-agent" type="button" data-auto-agent="backend"><i>API</i><strong>后端 Agent</strong><span>接口 / 数据</span></button>
-                        <button class="tester-agent" type="button" data-auto-agent="tester"><i>QA</i><strong>测试 Agent</strong><span>验收 / 校验</span></button>
-                        <button class="reviewer-agent" type="button" data-auto-agent="reviewer"><i>RV</i><strong>Reviewer</strong><span>Review / 补丁</span></button>
-                      </div>
-                      <div class="agent-arbitration-note" id="agentArbitrationNote">Master 会根据需求自动推荐最合适的 Agent。</div>
-                      <form id="autoCodeForm" class="auto-code-form">
-                        <textarea id="autoCodeInput" placeholder="/code 优化这个页面的按钮间距和评论区布局"></textarea>
-                        <select id="autoCodeOwner" class="agent-owner-select" aria-label="当前 Agent">
-                          <option value="frontend">前端 Agent</option>
-                          <option value="backend">后端 Agent</option>
-                          <option value="tester">测试 Agent</option>
-                          <option value="reviewer">Reviewer</option>
-                        </select>
-                        <button type="submit">启动 Agent</button>
-                      </form>
-                    </section>
                     <pre id="repoCodeView"></pre>
                     <textarea id="manualCodeEditor" class="manual-code-editor" aria-hidden="true"></textarea>
                   </div>
                 </div>
+                <section class="auto-code-panel active" id="autoCodePanel">
+                  <div class="auto-code-brand"><strong>Agent 编排控制台</strong><button type="button" data-coding-mode="manual" title="切到手动编码">×</button></div>
+                  <div class="auto-code-hero">
+                    <div class="auto-code-icon">FLOW</div>
+                    <h3>把需求交给多智能体流水线</h3>
+                    <p>任务会先进入 Master 仲裁，再交给对应 Agent 编码、测试、审查和回写。</p>
+                  </div>
+                  <div class="auto-code-points">
+                    <span>Master 判断任务归属和执行顺序</span>
+                    <span>Agent 输出代码后进入 Review 门禁</span>
+                    <span>结果写入代码区，评论区继续投票修正</span>
+                  </div>
+                  <div class="auto-agent-grid" aria-label="选择 Agent">
+                    <button class="active frontend-agent" type="button" data-auto-agent="frontend"><i>UI</i><strong>前端 Agent</strong><span>界面 / 交互</span></button>
+                    <button class="backend-agent" type="button" data-auto-agent="backend"><i>API</i><strong>后端 Agent</strong><span>接口 / 数据</span></button>
+                    <button class="tester-agent" type="button" data-auto-agent="tester"><i>QA</i><strong>测试 Agent</strong><span>验收 / 校验</span></button>
+                    <button class="reviewer-agent" type="button" data-auto-agent="reviewer"><i>RV</i><strong>Reviewer</strong><span>Review / 补丁</span></button>
+                  </div>
+                  <div class="agent-arbitration-note" id="agentArbitrationNote">Master 会根据需求自动推荐最合适的 Agent。</div>
+                  <form id="autoCodeForm" class="auto-code-form">
+                    <textarea id="autoCodeInput" placeholder="/code 优化这个页面的按钮间距和评论区布局"></textarea>
+                    <select id="autoCodeOwner" class="agent-owner-select" aria-label="当前 Agent">
+                      <option value="frontend">前端 Agent</option>
+                      <option value="backend">后端 Agent</option>
+                      <option value="tester">测试 Agent</option>
+                      <option value="reviewer">Reviewer</option>
+                    </select>
+                    <button type="submit">启动 Agent</button>
+                  </form>
+                </section>
+                <section class="llm-plugin-panel" id="llmPluginPanel" aria-hidden="true">
+                  <div class="llm-plugin-head">
+                    <div><span>LLM Plugin</span><strong>接入大模型插件</strong></div>
+                    <button id="llmPluginSaveBtn" type="button">保存配置</button>
+                  </div>
+                  <div class="llm-plugin-grid">
+                    <label><span>插件</span><select id="llmPluginProvider"><option value="openai">OpenAI Compatible</option><option value="local">本地模型 / Ollama</option><option value="custom">自定义网关</option></select></label>
+                    <label><span>模型</span><input id="llmPluginModel" type="text" placeholder="gpt-4.1 / qwen-coder / deepseek-coder" /></label>
+                    <label><span>API Base</span><input id="llmPluginBaseUrl" type="text" placeholder="https://api.openai.com/v1" /></label>
+                    <label><span>API Key</span><input id="llmPluginApiKey" type="password" placeholder="sk-... / 本地模型可留空" /></label>
+                  </div>
+                  <textarea id="llmPluginPrompt" placeholder="让模型基于当前文件生成补丁、解释代码、补全函数或修复报错..."></textarea>
+                  <div class="llm-plugin-actions">
+                    <button id="llmPluginGenerateBtn" type="button">生成补丁</button>
+                    <button id="llmPluginInsertBtn" type="button">插入编辑器</button>
+                    <button id="llmPluginReviewBtn" type="button">发到 Review</button>
+                  </div>
+                  <div class="llm-plugin-output" id="llmPluginOutput">切到手动编码后，可以把当前代码上下文交给任意 OpenAI-compatible 模型生成候选补丁。</div>
+                </section>
                 <section class="code-review-comments">
                   <div class="review-panel-head"><div><span>Review</span><h3>代码区评论</h3></div><button id="adoptSuggestionBtn" type="button">生成候选补丁</button></div>
                   <div class="patch-preview-panel" id="patchPreviewPanel"><div class="patch-preview-empty">暂无候选补丁。先给建议投票，再生成候选。</div></div>
@@ -357,7 +446,7 @@
                 </section>
               </section>
               <section class="open-world-content-panel qf-panel" id="issuesPanel">
-                <div class="qf-panel-head"><h3>内部任务 / Issues</h3><span>来自 Connector、战情室和手动创建</span></div>
+                <div class="qf-panel-head"><h3>内部任务 / Issues</h3><span>来自 Connector、调度中枢和手动创建</span></div>
                 <form class="issue-create-form" id="issueCreateForm">
                   <div class="issue-create-main">
                     <input id="issueKeywordInput" type="text" placeholder="输入关键词，例如：登录页 验证码 用户资料页" />
@@ -436,7 +525,7 @@
                 </div>
                 <div class="osw-repo-list" id="publicRepoSidebarList">
                   <button><strong>quantumflow-runtime</strong><span>调度 / WebSocket / Connector</span></button>
-                  <button><strong>agent-desktop</strong><span>战情室 / 源文明 / UI</span></button>
+                  <button><strong>agent-desktop</strong><span>调度中枢 / 源文明 / UI</span></button>
                   <button><strong>app-connectors</strong><span>飞书 / 企业微信 / 微信客服</span></button>
                 </div>
               </section>
@@ -525,7 +614,7 @@
                 </div>
                 <div class="osw-repo-list" id="publicRepoList">
                   <button><strong>quantumflow-runtime</strong><span>调度 / WebSocket / Connector</span></button>
-                  <button><strong>agent-desktop</strong><span>战情室 / 源文明 / UI</span></button>
+                  <button><strong>agent-desktop</strong><span>调度中枢 / 源文明 / UI</span></button>
                   <button><strong>app-connectors</strong><span>飞书 / 企业微信 / 微信客服</span></button>
                 </div>
               </section>
@@ -776,7 +865,7 @@
                     <div class="workspace-mini-head"><span>Codex Task</span><strong>交给 Agent</strong></div>
                     <select class="workspace-room-select" id="workspaceRoomSelect"><option value="">当前项目房间</option></select>
                     <form class="workspace-task-form" id="workspaceTaskForm">
-                      <textarea id="workspaceTaskInput" placeholder="输入要一起开发的需求，例如：让 Codex 生成登录页并交给战情室 Agent 自动编码。"></textarea>
+                      <textarea id="workspaceTaskInput" placeholder="输入要一起开发的需求，例如：让 Codex 生成登录页并交给调度中枢 Agent 自动编码。"></textarea>
                       <div>
                         <select id="workspaceTaskOwner"><option value="master">Master 协调</option><option value="frontend">Frontend Agent</option><option value="backend">Backend Agent</option><option value="tester">Tester Agent</option><option value="reviewer">Reviewer Agent</option></select>
                         <button type="submit">交给 Codex / Agent</button>
@@ -860,11 +949,15 @@
                 <div class="admin-panel-head"><h3>权限 / 成员</h3><span>Admin gate</span></div>
                 <form class="admin-inline-form admin-control-card" id="adminMemberForm">
                   <div class="admin-form-copy"><strong>添加协作者</strong><span>后续用于项目权限、接口权限和联机身份</span></div>
-                  <input id="adminMemberName" type="text" placeholder="成员名称" />
+                  <div class="admin-user-lookup">
+                    <input id="adminMemberUserId" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="用户 ID" />
+                    <span id="adminMemberLookupState">输入 ID 后自动匹配姓名</span>
+                  </div>
+                  <input id="adminMemberName" type="text" placeholder="成员名称" readonly />
                   <select id="adminMemberRole"><option>Developer</option><option>Admin</option><option>Reviewer</option><option>Guest</option></select>
                   <input id="adminMemberProject" type="text" placeholder="项目范围，例如 QuantumFlow Core" />
                   <div class="admin-permission-picker">
-                    <button type="button" data-admin-permission-toggle="war_room" aria-pressed="true">战情室</button>
+                    <button type="button" data-admin-permission-toggle="war_room" aria-pressed="true">调度中枢</button>
                     <button type="button" data-admin-permission-toggle="source_world" aria-pressed="true">开源世界</button>
                     <button type="button" data-admin-permission-toggle="workspace" aria-pressed="true">项目房间</button>
                     <button type="button" data-admin-permission-toggle="api_registry" aria-pressed="false">接口</button>
@@ -934,7 +1027,7 @@
       </main>
     </div>
 
-    <script src="/app.js?v=20260603-codex-after-user"></script>
+    <script src="/app.js?v=20260604-runtime-open-external"></script>
   </body>
 </html>
 

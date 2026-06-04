@@ -168,6 +168,30 @@ class SnapshotStore:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS project_delivery (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    package_name TEXT NOT NULL,
+                    package_path TEXT NOT NULL,
+                    project_path TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'ready',
+                    validation TEXT,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_project_delivery_task
+                ON project_delivery(task_id, created_at)
+                """
+            )
+            self._ensure_column(conn, "project_delivery", "last_test_status", "TEXT")
+            self._ensure_column(conn, "project_delivery", "last_test_output", "TEXT")
+            self._ensure_column(conn, "project_delivery", "last_test_at", "TEXT")
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS collaboration_comment (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     author TEXT NOT NULL,
@@ -188,6 +212,25 @@ class SnapshotStore:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS codex_memory (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    tags TEXT NOT NULL DEFAULT '',
+                    pinned INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_codex_memory_created_at
+                ON codex_memory(created_at)
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS admin_member (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
@@ -200,6 +243,7 @@ class SnapshotStore:
             self._ensure_column(conn, "admin_member", "project_scope", "TEXT DEFAULT 'QuantumFlow Core'")
             self._ensure_column(conn, "admin_member", "permissions", "TEXT DEFAULT '{}'")
             self._ensure_column(conn, "admin_member", "invite_code", "TEXT")
+            self._ensure_column(conn, "admin_member", "user_id", "INTEGER")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS project_room (
@@ -865,6 +909,106 @@ class SnapshotStore:
             for row in rows
         ]
 
+    def record_project_delivery(
+        self,
+        task_id: str,
+        title: str,
+        package_name: str,
+        package_path: str,
+        project_path: str,
+        status: str = "ready",
+        validation: str = "",
+    ) -> Dict[str, Any]:
+        created_at = datetime.now().isoformat(timespec="seconds")
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO project_delivery(
+                    task_id, title, package_name, package_path,
+                    project_path, status, validation, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (task_id, title, package_name, package_path, project_path, status, validation, created_at),
+            )
+            row_id = cursor.lastrowid
+        return {
+            "id": row_id,
+            "task_id": task_id,
+            "title": title,
+            "package_name": package_name,
+            "package_path": package_path,
+            "project_path": project_path,
+            "status": status,
+            "validation": validation,
+            "created_at": created_at,
+        }
+
+    def get_project_delivery(self, delivery_id: int) -> Dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, task_id, title, package_name, package_path,
+                       project_path, status, validation, created_at,
+                       last_test_status, last_test_output, last_test_at
+                FROM project_delivery
+                WHERE id = ?
+                """,
+                (delivery_id,),
+            ).fetchone()
+        return self._project_delivery_from_row(row) if row else None
+
+    def recent_project_deliveries(self, limit: int = 20) -> List[Dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, task_id, title, package_name, package_path,
+                       project_path, status, validation, created_at,
+                       last_test_status, last_test_output, last_test_at
+                FROM project_delivery
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [self._project_delivery_from_row(row) for row in rows]
+
+    def update_project_delivery_test(
+        self,
+        delivery_id: int,
+        test_status: str,
+        test_output: str,
+    ) -> Dict[str, Any] | None:
+        tested_at = datetime.now().isoformat(timespec="seconds")
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE project_delivery
+                SET last_test_status = ?, last_test_output = ?, last_test_at = ?
+                WHERE id = ?
+                """,
+                (test_status, test_output, tested_at, delivery_id),
+            )
+            if cursor.rowcount == 0:
+                return None
+        return self.get_project_delivery(delivery_id)
+
+    def _project_delivery_from_row(self, row: tuple[Any, ...]) -> Dict[str, Any]:
+        return {
+            "id": row[0],
+            "task_id": row[1],
+            "title": row[2],
+            "package_name": row[3],
+            "package_path": row[4],
+            "project_path": row[5],
+            "status": row[6],
+            "validation": row[7],
+            "created_at": row[8],
+            "last_test_status": row[9] if len(row) > 9 else None,
+            "last_test_output": row[10] if len(row) > 10 else None,
+            "last_test_at": row[11] if len(row) > 11 else None,
+        }
+
     def record_collaboration_comment(
         self,
         author: str,
@@ -944,13 +1088,84 @@ class SnapshotStore:
                 cursor = conn.execute("DELETE FROM collaboration_comment")
             return cursor.rowcount
 
+    def record_codex_memory(
+        self,
+        source: str,
+        role: str,
+        text: str,
+        tags: str = "",
+        pinned: bool = False,
+    ) -> Dict[str, Any]:
+        created_at = datetime.now().isoformat(timespec="seconds")
+        with self._connect() as conn:
+            existing = None
+            if pinned or "project-index" in tags:
+                existing = conn.execute(
+                    "SELECT id FROM codex_memory WHERE source = ? AND role = ? AND tags = ? LIMIT 1",
+                    (source, role, tags),
+                ).fetchone()
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE codex_memory
+                    SET text = ?, pinned = ?, created_at = ?
+                    WHERE id = ?
+                    """,
+                    (text, 1 if pinned else 0, created_at, existing[0]),
+                )
+                row_id = existing[0]
+            else:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO codex_memory(source, role, text, tags, pinned, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (source, role, text, tags, 1 if pinned else 0, created_at),
+                )
+                row_id = cursor.lastrowid
+        return {
+            "id": row_id,
+            "source": source,
+            "role": role,
+            "text": text,
+            "tags": tags,
+            "pinned": bool(pinned),
+            "created_at": created_at,
+        }
+
+    def recent_codex_memories(self, limit: int = 80) -> List[Dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, source, role, text, tags, pinned, created_at
+                FROM codex_memory
+                ORDER BY pinned DESC, id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [
+            {
+                "id": row[0],
+                "source": row[1],
+                "role": row[2],
+                "text": row[3],
+                "tags": row[4],
+                "pinned": bool(row[5]),
+                "created_at": row[6],
+            }
+            for row in rows
+        ]
+
     def list_admin_members(self) -> List[Dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, name, role, status, created_at, project_scope, permissions, invite_code
-                FROM admin_member
-                ORDER BY id DESC
+                SELECT m.id, m.name, m.role, m.status, m.created_at, m.project_scope, m.permissions, m.invite_code,
+                       m.user_id, u.username, u.display_name, u.email, u.phone
+                FROM admin_member m
+                LEFT JOIN app_user u ON u.id = m.user_id
+                ORDER BY m.id DESC
                 """
             ).fetchall()
         return [
@@ -963,6 +1178,11 @@ class SnapshotStore:
                 "project_scope": row[5] or "QuantumFlow Core",
                 "permissions": json.loads(row[6] or "{}"),
                 "invite_code": row[7] or "",
+                "user_id": row[8],
+                "username": row[9] or "",
+                "display_name": row[10] or row[1],
+                "email": row[11] or "",
+                "phone": row[12] or "",
             }
             for row in rows
         ]
@@ -970,6 +1190,7 @@ class SnapshotStore:
     def add_admin_member(
         self,
         name: str,
+        user_id: int | None = None,
         role: str = "Developer",
         status: str = "active",
         project_scope: str = "QuantumFlow Core",
@@ -979,17 +1200,46 @@ class SnapshotStore:
         created_at = datetime.now().isoformat(timespec="seconds")
         permission_text = json.dumps(permissions or {}, ensure_ascii=False)
         with self._connect() as conn:
+            if user_id is not None:
+                existing = conn.execute("SELECT id FROM admin_member WHERE user_id = ? LIMIT 1", (user_id,)).fetchone()
+                if not existing:
+                    existing = conn.execute(
+                        "SELECT id FROM admin_member WHERE user_id IS NULL AND name = ? LIMIT 1",
+                        (name,),
+                    ).fetchone()
+                if existing:
+                    conn.execute(
+                        """
+                        UPDATE admin_member
+                        SET name = ?, role = ?, status = ?, project_scope = ?, permissions = ?, invite_code = ?, user_id = ?
+                        WHERE id = ?
+                        """,
+                        (name, role, status, project_scope, permission_text, invite_code, user_id, existing[0]),
+                    )
+                    row_id = existing[0]
+                    return next((item for item in self.list_admin_members() if item["id"] == row_id), None) or {
+                        "id": row_id,
+                        "name": name,
+                        "user_id": user_id,
+                        "role": role,
+                        "status": status,
+                        "created_at": created_at,
+                        "project_scope": project_scope,
+                        "permissions": permissions or {},
+                        "invite_code": invite_code,
+                    }
             cursor = conn.execute(
                 """
-                INSERT INTO admin_member(name, role, status, created_at, project_scope, permissions, invite_code)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO admin_member(name, role, status, created_at, project_scope, permissions, invite_code, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (name, role, status, created_at, project_scope, permission_text, invite_code),
+                (name, role, status, created_at, project_scope, permission_text, invite_code, user_id),
             )
             row_id = cursor.lastrowid
         return {
             "id": row_id,
             "name": name,
+            "user_id": user_id,
             "role": role,
             "status": status,
             "created_at": created_at,
@@ -1016,7 +1266,7 @@ class SnapshotStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT id, name, role, status, created_at, project_scope, permissions, invite_code
+                SELECT id, name, role, status, created_at, project_scope, permissions, invite_code, user_id
                 FROM admin_member WHERE id = ?
                 """,
                 (member_id,),
@@ -1028,6 +1278,7 @@ class SnapshotStore:
                     "project_scope": row[5] or "QuantumFlow Core",
                     "permissions": json.loads(row[6] or "{}"),
                     "invite_code": row[7] or "",
+                    "user_id": row[8],
                 }
             if not current:
                 return None
@@ -1444,6 +1695,17 @@ class SnapshotStore:
     def update_user_profile(self, user_id: int, display_name: str) -> Dict[str, Any] | None:
         with self._connect() as conn:
             conn.execute("UPDATE app_user SET display_name = ? WHERE id = ?", (display_name, user_id))
+        return self.get_user(user_id)
+
+    def update_user_access(self, user_id: int, role: str | None = None, status: str | None = None) -> Dict[str, Any] | None:
+        current = self.get_user(user_id)
+        if not current:
+            return None
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE app_user SET role = ?, status = ? WHERE id = ?",
+                (role or current["role"], status or current["status"], user_id),
+            )
         return self.get_user(user_id)
 
     def touch_user_login(self, user_id: int) -> None:
