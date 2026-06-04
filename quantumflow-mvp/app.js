@@ -191,6 +191,26 @@ const openWorldRepos = [
       "douyin.md": ["私信/评论入口", "内容审核", "任务归档", "回复队列"],
     },
   },
+  {
+    id: "project",
+    name: "agent-delivery-project",
+    desc: "Agent-generated runnable projects. It can become a Vue3 frontend, FastAPI backend, tests, and review output according to the task.",
+    lang: "Vue/Python/JS",
+    stars: 42,
+    files: {
+      "README.md": ["# Agent 生成项目", "", "这里会显示负责人整合后的完整系统说明。"],
+      "package.json": ["{\"type\":\"module\",\"scripts\":{\"dev\":\"vite --host 127.0.0.1\"}}"],
+      "index.html": ["<div id=\"app\"></div>", "<script type=\"module\" src=\"/src/main.js\"></script>"],
+      "src/main.js": ["import { createApp } from 'vue'", "import App from './App.vue'", "createApp(App).mount('#app')"],
+      "src/App.vue": ["<script setup>", "const books = []", "</script>", "<template>图书管理前端</template>"],
+      "src/style.css": [".library-shell { width: min(1180px, 100%); }"],
+      "tests/book.spec.js": ["import assert from 'node:assert/strict'", "assert.match(main, /createApp/)"],
+      "app/main.py": ["from fastapi import FastAPI", "app = FastAPI()", "GET /api/health", "GET/POST/PATCH /api/tasks"],
+      "app/static/app.js": ["const state = { tasks: [] }", "loadTasks()", "render()", "更新任务状态"],
+      "tests/test_smoke.py": ["from fastapi.testclient import TestClient", "def test_health_and_task_flow():"],
+      "docs/review-checklist.md": ["# Reviewer 审查清单", "- 后端 API", "- 前端交互", "- 烟测覆盖"],
+    },
+  },
 ];
 
 const people = [
@@ -249,6 +269,8 @@ let backendConnected = false;
 let backendAutoTimer = null;
 let arbitrationTimer = null;
 let backendQueueStats = { pending: 0, active: 0, blocked: 0, running_total: 0, completed_total: 0 };
+let suppressNonEmptyTaskSnapshotUntil = 0;
+let localWorkflowTaskSeq = 1;
 let projectDeliveries = [];
 let activeRuntimeDeliveryId = localStorage.getItem("qfActiveRuntimeDeliveryId") || "";
 const deliveryTestStates = {};
@@ -425,6 +447,7 @@ const els = {
   queueBoard: document.getElementById("queueBoard"),
   connectionState: document.getElementById("connectionState"),
   taskCount: document.getElementById("taskCount"),
+  clearTasksBtn: document.getElementById("clearTasksBtn"),
   runningCount: document.getElementById("runningCount"),
   taskForm: document.getElementById("taskForm"),
   taskInput: document.getElementById("taskInput"),
@@ -1148,6 +1171,11 @@ function statusLabel(status) {
     working: "执行中",
     blocked: "阻塞",
     done: "完成",
+    assigned: "待接受",
+    review: "待审核",
+    packaged: "已打包",
+    delivery: "待交付",
+    delivered: "已交付",
   }[status];
 }
 
@@ -1173,7 +1201,25 @@ function renderAgents() {
 
 function openAgentQuickPanel(agent) {
   if (!agent || !els.agentQuickPanel) return;
-  const task = tasks.find((item) => item.owner === agent.id && ["active", "blocked", "pending"].includes(item.status));
+  if (agent.id === "reviewer") {
+    openReviewerDispatchPanel(agent);
+    return;
+  }
+  if (agent.id === "master") {
+    const deliveryTask = tasks.find((item) => item.status === "delivery") || tasks.find((item) => item.status === "packaged");
+    if (deliveryTask) {
+      openMasterDeliveryPanel(agent, deliveryTask);
+      return;
+    }
+  }
+  if (["frontend", "backend", "tester"].includes(agent.id)) {
+    const assignedTask = tasks.find((item) => item.owner === agent.id && item.status === "assigned");
+    if (assignedTask) {
+      openWorkerAcceptPanel(agent, assignedTask);
+      return;
+    }
+  }
+  const task = tasks.find((item) => item.owner === agent.id && ["active", "blocked", "pending", "review"].includes(item.status));
   const lines = codeSamples[agent.id] || [];
   const panelWidth = 520;
   const panelHeight = 360;
@@ -1207,15 +1253,244 @@ function openAgentQuickPanel(agent) {
   els.agentQuickPanel.setAttribute("aria-hidden", "false");
 }
 
+function positionAgentQuickPanel(agent, width = 520, height = 360) {
+  const x = Math.max(18, Math.min(agent.x + 72, 1280 - width));
+  const y = Math.max(18, Math.min(agent.y - 86, 600 - height));
+  els.agentQuickPanel.style.setProperty("--quick-x", `${x}px`);
+  els.agentQuickPanel.style.setProperty("--quick-y", `${y}px`);
+}
+
+function openReviewerDispatchPanel(agent) {
+  const candidates = tasks.filter((item) => ["pending", "blocked", "active", "review"].includes(item.status));
+  const panelWidth = 600;
+  const panelHeight = 390;
+  const x = Math.max(18, Math.min(agent.x - 500, 1280 - panelWidth));
+  const y = Math.max(18, Math.min(agent.y - 120, 600 - panelHeight));
+
+  els.agentQuickPanel.style.setProperty("--quick-x", `${x}px`);
+  els.agentQuickPanel.style.setProperty("--quick-y", `${y}px`);
+  els.agentQuickKicker.textContent = `${agent.role} / 接收与分配`;
+  els.agentQuickTitle.textContent = "代码审查者的任务分配台";
+  els.agentQuickCode.innerHTML = `
+    <div class="reviewer-dispatch-list">
+      <div class="reviewer-dispatch-head"><span>待处理任务</span><strong>${candidates.length}</strong></div>
+      ${
+        candidates.length
+          ? candidates
+              .slice(0, 6)
+              .map(
+                (task) => `
+        <button type="button" class="reviewer-task-choice" data-reviewer-task="${escapeHtml(task.title)}">
+          <strong>${escapeHtml(task.title)}</strong>
+          <span>${escapeHtml(agentById(task.owner)?.name || task.owner)} / ${escapeHtml(statusLabel(task.status) || task.status)}</span>
+        </button>
+      `,
+              )
+              .join("")
+          : '<div class="reviewer-task-empty">暂无待处理任务，可以在右侧输入新任务后分配。</div>'
+      }
+    </div>
+  `;
+  els.agentQuickExplain.innerHTML = `
+    <form class="reviewer-dispatch-form" id="reviewerDispatchForm">
+      <strong>接收任务</strong>
+      <textarea id="reviewerDispatchInput" placeholder="输入要分配的任务，或点击左侧待处理任务带入..."></textarea>
+      <strong>分配给</strong>
+      <div class="reviewer-dispatch-targets">
+        <button type="button" data-reviewer-owner-toggle="frontend" aria-pressed="true"><b>前端</b><span>页面、交互、样式</span></button>
+        <button type="button" data-reviewer-owner-toggle="backend" aria-pressed="true"><b>后端</b><span>接口、数据库、服务</span></button>
+        <button type="button" data-reviewer-owner-toggle="tester" aria-pressed="true"><b>测试</b><span>验收、冒烟、回归</span></button>
+      </div>
+      <button class="reviewer-dispatch-submit" type="button" data-reviewer-dispatch-submit>分配给已选 Agent</button>
+      <button class="reviewer-review-submit" type="button" data-reviewer-review-submit>审核通过并打包给团队负责人</button>
+      <p class="reviewer-dispatch-note" id="reviewerDispatchNote">Reviewer 可以多选 Agent；任务会先进入“待接受”，接受后才执行。</p>
+    </form>
+  `;
+  els.agentQuickEditorBtn.textContent = "打开代码区";
+  els.agentQuickPanel.classList.add("active", "reviewer-dispatch-mode");
+  els.agentQuickPanel.setAttribute("aria-hidden", "false");
+}
+
+function openWorkerAcceptPanel(agent, task) {
+  positionAgentQuickPanel(agent, 540, 330);
+  els.agentQuickKicker.textContent = `${agent.role} / 待接受`;
+  els.agentQuickTitle.textContent = `${agent.name} 的任务接收台`;
+  els.agentQuickCode.innerHTML = `
+    <div class="worker-accept-card">
+      <span>Reviewer 分配</span>
+      <strong>${escapeHtml(task.title)}</strong>
+      <p>${escapeHtml(agent.name)} 需要先接受任务，接受后才进入执行状态。</p>
+    </div>
+  `;
+  els.agentQuickExplain.innerHTML = `
+    <div class="worker-accept-actions">
+      <strong>接受后执行</strong>
+      <p>执行完成后会回到 Reviewer 审核；Reviewer 审核通过后打包给团队负责人交付。</p>
+      <button type="button" data-worker-accept-task="${escapeHtml(task.localWorkflowId || task.id)}">接受任务</button>
+    </div>
+  `;
+  els.agentQuickEditorBtn.textContent = "打开代码区";
+  els.agentQuickPanel.classList.add("active", "worker-accept-mode");
+  els.agentQuickPanel.setAttribute("aria-hidden", "false");
+}
+
+function openMasterDeliveryPanel(agent, task) {
+  positionAgentQuickPanel(agent, 540, 330);
+  els.agentQuickKicker.textContent = `${agent.role} / 待交付`;
+  els.agentQuickTitle.textContent = "团队负责人的交付台";
+  els.agentQuickCode.innerHTML = `
+    <div class="worker-accept-card master-delivery-card">
+      <span>Reviewer 已审核并打包</span>
+      <strong>${escapeHtml(task.title)}</strong>
+      <p>代码负责人审核通过后已通知团队负责人，当前等待最终交付。</p>
+    </div>
+  `;
+  els.agentQuickExplain.innerHTML = `
+    <div class="worker-accept-actions">
+      <strong>交付任务</strong>
+      <p>团队负责人确认包内容后完成交付，任务从队列移除。</p>
+      <button type="button" data-master-deliver-task="${escapeHtml(task.localWorkflowId || task.id)}">确认交付</button>
+    </div>
+  `;
+  els.agentQuickEditorBtn.textContent = "查看交付代码";
+  els.agentQuickPanel.classList.add("active", "worker-accept-mode");
+  els.agentQuickPanel.setAttribute("aria-hidden", "false");
+}
+
 function closeAgentQuickPanel() {
   els.agentQuickPanel?.classList.remove("active");
+  els.agentQuickPanel?.classList.remove("reviewer-dispatch-mode");
+  els.agentQuickPanel?.classList.remove("worker-accept-mode");
   els.agentQuickPanel?.setAttribute("aria-hidden", "true");
+  if (els.agentQuickEditorBtn) els.agentQuickEditorBtn.textContent = "进入完整编辑器";
 }
 
 function openSelectedAgentEditor() {
   const agent = agentById(selectedAgentId);
   closeAgentQuickPanel();
   jumpAgentToCodeArea(agent);
+}
+
+function selectedReviewerOwners() {
+  return [...document.querySelectorAll("[data-reviewer-owner-toggle][aria-pressed='true']")].map((button) => button.dataset.reviewerOwnerToggle);
+}
+
+function stationForOwner(ownerId) {
+  return {
+    master: [520, 160],
+    frontend: [560, 240],
+    backend: [995, 255],
+    tester: [1185, 160],
+    reviewer: [1110, 345],
+  }[ownerId] || [520, 160];
+}
+
+function createReviewerAssignedTasks(title, ownerIds) {
+  const workflowId = `wf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  ownerIds.forEach((ownerId) => {
+    const owner = agentById(ownerId);
+    if (!owner) return;
+    tasks.push({
+      id: `local-${localWorkflowTaskSeq++}`,
+      localWorkflowId: `${workflowId}-${ownerId}`,
+      workflowId,
+      workflowTitle: title,
+      title: `${title} / ${owner.name}`,
+      owner: ownerId,
+      station: stationForOwner(ownerId),
+      status: "assigned",
+      source: "reviewer_dispatch",
+      requiresReview: true,
+    });
+    setAgent(ownerId, { status: "idle" });
+  });
+  backendQueueStats = { ...backendQueueStats, pending: tasks.filter((task) => task.status === "pending" || task.status === "assigned").length, running_total: tasks.filter((task) => task.status !== "done" && task.status !== "delivered").length };
+  renderAll();
+}
+
+function dispatchReviewerTask(ownerId = "") {
+  const input = document.getElementById("reviewerDispatchInput");
+  const note = document.getElementById("reviewerDispatchNote");
+  const title = input?.value.trim() || "";
+  if (!title) {
+    if (note) note.textContent = "先输入任务内容，或点击左侧待处理任务。";
+    input?.focus();
+    return;
+  }
+  const owners = ownerId ? [ownerId] : selectedReviewerOwners();
+  if (!owners.length) {
+    if (note) note.textContent = "至少选择前端、后端或测试中的一个。";
+    return;
+  }
+  createReviewerAssignedTasks(title, owners);
+  setAgent("reviewer", { status: "done" });
+  const ownerNames = owners.map((id) => agentById(id)?.name || id).join("、");
+  addLog(`Reviewer 已分配待接受任务给 ${ownerNames}：${title}`, "代码审查者");
+  pushComment("代码审查者", `已判断任务归属，分配给 ${ownerNames}；等待 Agent 接受后执行：${title}`);
+  if (input) input.value = "";
+  if (note) note.textContent = `已分配给 ${ownerNames}，等待他们接受任务。`;
+  renderAgents();
+  renderAgentStrip();
+}
+
+function findWorkflowTask(taskKey) {
+  return tasks.find((task) => String(task.localWorkflowId || task.id) === String(taskKey));
+}
+
+function acceptWorkerTask(taskKey) {
+  const task = findWorkflowTask(taskKey);
+  if (!task) return;
+  const owner = agentById(task.owner);
+  task.status = "pending";
+  addLog(`${owner.name} 已接受任务：${task.workflowTitle || task.title}`, owner.name);
+  pushComment(owner.name, `已接受任务，开始执行：${task.workflowTitle || task.title}`);
+  const index = tasks.indexOf(task);
+  closeAgentQuickPanel();
+  runTask(index, { local: true });
+}
+
+function approveReviewerPackage() {
+  const reviewTasks = tasks.filter((task) => task.requiresReview && task.status === "review");
+  const note = document.getElementById("reviewerDispatchNote");
+  if (!reviewTasks.length) {
+    if (note) note.textContent = "暂无已完成待审核的任务，等前端/后端/测试执行完成后再打包。";
+    return;
+  }
+  const groupedTitle = reviewTasks[0].workflowTitle || reviewTasks[0].title;
+  const packageTask = {
+    id: `local-${localWorkflowTaskSeq++}`,
+    localWorkflowId: `delivery-${Date.now().toString(36)}`,
+    workflowId: reviewTasks[0].workflowId || `delivery-${Date.now().toString(36)}`,
+    workflowTitle: groupedTitle,
+    title: `交付包：${groupedTitle}`,
+    owner: "master",
+    station: stationForOwner("master"),
+    status: "delivery",
+    source: "reviewer_package",
+  };
+  reviewTasks.forEach((task) => {
+    task.status = "packaged";
+  });
+  tasks.push(packageTask);
+  writeCollaborativeProjectCode({ ...packageTask, title: groupedTitle });
+  setAgent("reviewer", { status: "done" });
+  setAgent("master", { status: "idle" });
+  addLog(`Reviewer 审核通过并打包给团队负责人：${groupedTitle}`, "代码审查者");
+  pushComment("代码审查者", `代码负责人审核通过，已打包交给团队负责人：${groupedTitle}`);
+  if (note) note.textContent = "已审核通过并打包给团队负责人，等待负责人交付。";
+  renderAll();
+}
+
+function deliverMasterTask(taskKey) {
+  const task = findWorkflowTask(taskKey);
+  if (!task) return;
+  const title = task.workflowTitle || task.title;
+  tasks = tasks.filter((item) => item.workflowId !== task.workflowId && item.localWorkflowId !== task.localWorkflowId);
+  setAgent("master", { status: "done", x: agentById("master").home[0], y: agentById("master").home[1] });
+  addLog(`团队负责人已交付任务：${title}`, "团队负责人");
+  pushComment("团队负责人", `已完成最终交付：${title}`);
+  closeAgentQuickPanel();
+  renderAll();
 }
 
 function jumpAgentToCodeArea(agent) {
@@ -1305,8 +1580,9 @@ function renderTasks() {
         <strong>等待真实任务</strong>
         <span>飞书 / 手动 / Bot 命令进入后会自动进入队列并立即执行。</span>
       </div>
-      ${renderProjectDeliveryCards()}
     `;
+    bindProjectDeliveryActions();
+    renderRuntimeEnvironment();
     renderCommunity();
     return;
   }
@@ -1322,18 +1598,26 @@ function renderTasks() {
       </div>
     `,
     )
-    .join("") + renderProjectDeliveryCards();
+    .join("");
   document.querySelectorAll(".task-item").forEach((node) => {
     node.addEventListener("click", () => runTask(Number(node.dataset.task)));
   });
+  bindProjectDeliveryActions();
+  renderRuntimeEnvironment();
+  renderCommunity();
+}
+
+function bindProjectDeliveryActions() {
   document.querySelectorAll("[data-test-delivery]").forEach((button) => {
+    if (button.dataset.boundDeliveryAction === "1") return;
+    button.dataset.boundDeliveryAction = "1";
     button.addEventListener("click", () => openDeliveryRuntimeEnvironment(button.dataset.testDelivery));
   });
   document.querySelectorAll("[data-open-delivery]").forEach((button) => {
+    if (button.dataset.boundDeliveryAction === "1") return;
+    button.dataset.boundDeliveryAction = "1";
     button.addEventListener("click", () => openProjectDeliveryRuntime(button.dataset.openDelivery));
   });
-  renderRuntimeEnvironment();
-  renderCommunity();
 }
 
 function renderProjectDeliveryCards() {
@@ -1735,26 +2019,31 @@ function renderCodeLines(lines, fileName = "") {
 }
 
 function highlightCode(line, language) {
-  let code = escapeHtml(line);
-  const comments = [];
-  code = code.replace(/(\/\/.*|#.*)$/g, (match) => {
-    const token = `__COMMENT_${comments.length}__`;
-    comments.push(`<span class="tok-comment">${match}</span>`);
-    return token;
-  });
-  code = code.replace(/(&quot;.*?&quot;|&#039;.*?&#039;)/g, '<span class="tok-string">$1</span>');
-  code = code.replace(/\b(\d+)\b/g, '<span class="tok-number">$1</span>');
-  const keywordPattern =
-    language === "python"
-      ? /\b(from|import|class|def|return|with|as|if|else|elif|for|while|try|except|None|True|False|async|await)\b/g
-      : /\b(const|let|var|function|return|if|else|for|while|await|async|import|from|export|class|new|true|false|null)\b/g;
-  code = code.replace(keywordPattern, '<span class="tok-keyword">$1</span>');
-  code = code.replace(/\b([A-Za-z_][\w]*)\s*(?=\()/g, '<span class="tok-function">$1</span>');
-  code = code.replace(/\b(self|app|runtime|task|owner|status|title|source)\b/g, '<span class="tok-symbol">$1</span>');
-  comments.forEach((comment, index) => {
-    code = code.replace(`__COMMENT_${index}__`, comment);
-  });
-  return code || "&nbsp;";
+  const text = String(line ?? "");
+  if (!text) return "&nbsp;";
+  const tokenPattern = /(\/\/.*|#.*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b\d+(?:\.\d+)?\b|\b[A-Za-z_][\w]*\b)/g;
+  const pythonKeywords = new Set(["from", "import", "class", "def", "return", "with", "as", "if", "else", "elif", "for", "while", "try", "except", "None", "True", "False", "async", "await", "in", "and", "or", "not"]);
+  const jsKeywords = new Set(["const", "let", "var", "function", "return", "if", "else", "for", "while", "await", "async", "import", "from", "export", "class", "new", "true", "false", "null"]);
+  const keywords = language === "python" ? pythonKeywords : jsKeywords;
+  const symbols = new Set(["self", "app", "runtime", "task", "owner", "status", "title", "source", "client", "response", "payload"]);
+  let cursor = 0;
+  let html = "";
+  for (const match of text.matchAll(tokenPattern)) {
+    const token = match[0];
+    const index = match.index || 0;
+    html += escapeHtml(text.slice(cursor, index));
+    let className = "";
+    if (token.startsWith("//") || token.startsWith("#")) className = "tok-comment";
+    else if (token.startsWith("\"") || token.startsWith("'")) className = "tok-string";
+    else if (/^\d/.test(token)) className = "tok-number";
+    else if (keywords.has(token)) className = "tok-keyword";
+    else if (symbols.has(token)) className = "tok-symbol";
+    html += className ? `<span class="${className}">${escapeHtml(token)}</span>` : escapeHtml(token);
+    cursor = index + token.length;
+    if (className === "tok-comment") break;
+  }
+  html += escapeHtml(text.slice(cursor));
+  return html || "&nbsp;";
 }
 
 function renderCaptainVotes() {
@@ -2184,34 +2473,74 @@ function pullPublicRequest(id) {
 
 function pullAgentPlan(pull) {
   const branch = pull.branch || "main";
+  const spec = inferBusinessSpec(pull.title || "");
+  if (isVue3FrontendSpec(spec)) {
+    return [
+      {
+        agentId: "frontend",
+        repoId: "project",
+        fileName: "src/App.vue",
+        summary: "按需求生成 Vue3 图书管理主页面、状态流转和表单交互",
+        lines: buildAgentArtifactLines("frontend", pull, "src/App.vue"),
+      },
+      {
+        agentId: "frontend",
+        repoId: "project",
+        fileName: "src/style.css",
+        summary: "生成图书管理前端样式和响应式布局",
+        lines: buildAgentArtifactLines("frontend", pull, "src/style.css"),
+      },
+      {
+        agentId: "tester",
+        repoId: "project",
+        fileName: "tests/book.spec.js",
+        summary: "生成 Vue3 图书管理前端结构烟测",
+        lines: buildAgentArtifactLines("tester", pull, "tests/book.spec.js"),
+      },
+      {
+        agentId: "reviewer",
+        repoId: "project",
+        fileName: "docs/review-checklist.md",
+        summary: `Review ${branch} 的 Vue3 前端需求一致性和可运行性`,
+        lines: buildAgentArtifactLines("reviewer", pull, "docs/review-checklist.md"),
+      },
+      {
+        agentId: "master",
+        repoId: "project",
+        fileName: "README.md",
+        summary: "汇总运行方式、Agent 分工和交付说明",
+        lines: buildAgentArtifactLines("master", pull, "README.md"),
+      },
+    ];
+  }
   return [
     {
       agentId: "frontend",
-      repoId: "desktop",
-      fileName: "app.js",
-      summary: "实现交互入口、状态渲染和项目 URL 展示",
-      lines: buildAgentArtifactLines("frontend", pull, "app.js"),
+      repoId: "project",
+      fileName: "app/static/app.js",
+      summary: "实现任务看板交互、筛选、状态渲染和接口联动",
+      lines: buildAgentArtifactLines("frontend", pull, "app/static/app.js"),
     },
     {
       agentId: "backend",
-      repoId: "runtime",
-      fileName: "server.py",
-      summary: "补齐任务接收、状态流转和结果记录接口",
-      lines: buildAgentArtifactLines("backend", pull, "server.py"),
+      repoId: "project",
+      fileName: "app/main.py",
+      summary: "生成 FastAPI、SQLite 数据模型和任务接口",
+      lines: buildAgentArtifactLines("backend", pull, "app/main.py"),
     },
     {
       agentId: "tester",
-      repoId: "connectors",
-      fileName: "feishu.md",
-      summary: "生成冒烟测试清单和外部任务回传校验",
-      lines: buildAgentArtifactLines("tester", pull, "feishu.md"),
+      repoId: "project",
+      fileName: "tests/test_smoke.py",
+      summary: "生成健康检查、创建任务、更新状态和列表读取烟测",
+      lines: buildAgentArtifactLines("tester", pull, "tests/test_smoke.py"),
     },
     {
       agentId: "reviewer",
-      repoId: "runtime",
-      fileName: "Agent.py",
+      repoId: "project",
+      fileName: "docs/review-checklist.md",
       summary: `Review ${branch} 的可运行性与合并风险`,
-      lines: buildAgentArtifactLines("reviewer", pull, "Agent.py"),
+      lines: buildAgentArtifactLines("reviewer", pull, "docs/review-checklist.md"),
     },
   ];
 }
@@ -2219,7 +2548,7 @@ function pullAgentPlan(pull) {
 function dispatchPulledRequestToAgents(pull) {
   const plan = pullAgentPlan(pull);
   pull.status = "dispatching";
-  pull.repoId = pull.branch?.includes("feishu") ? "runtime" : "desktop";
+  pull.repoId = "project";
   pull.agentRuns = plan.map((item) => ({
     agentId: item.agentId,
     agentName: agentById(item.agentId)?.name || item.agentId,
@@ -2268,7 +2597,7 @@ function startPullAgentRun(pullId, planItem) {
     latestRun.status = "done";
     latestRun.finishedAt = new Date().toLocaleTimeString("zh-CN", { hour12: false });
     setAgent(planItem.agentId, { status: "done", x: agent.home[0], y: agent.home[1] });
-    pushPublicFeed(agent.name, `${pull.title}：分工完成`, `${planItem.fileName} 已产出可运行片段，等待负责人汇总。`, "Agent done / now");
+    pushPublicFeed(agent.name, `${pull.title}：分工完成`, `${planItem.fileName} 已产出可运行项目文件，等待负责人汇总。`, "Agent done / now");
     renderOpenSourceWorld();
   }, 1380 + planItem.lines.length * 120);
 }
@@ -2295,7 +2624,7 @@ function finishPullLeaderReview(pullId) {
       pull.status = "approved";
       pull.projectUrl = `${location.origin || "http://127.0.0.1:8765"}/open-source?project=${encodeURIComponent(slug)}&pull=${encodeURIComponent(pull.id)}`;
       pull.cloneUrl = `git clone ${publicWorldState.repos.find((repo) => repo.id === (pull.repoId || "desktop"))?.url || `https://example.com/QuantumFlow/${slug}.git`}`;
-      pull.leaderSummary = "Reviewer 已通过：代码片段语法结构可用，项目 URL 已生成，可以打开检查运行效果。";
+      pull.leaderSummary = "Reviewer 已通过：项目文件结构和语法门禁可用，项目 URL 已生成，可以打开检查运行效果。";
       publicWorldState.audits.unshift({
         id: `AUD-${Date.now().toString(36).toUpperCase()}`,
         agent: "Reviewer Agent",
@@ -2468,16 +2797,32 @@ function fallbackLlmPatch(context) {
   if (context.file.endsWith(".py")) {
     return [
       "",
-      `# LLM plugin candidate generated locally at ${now}`,
-      "def quantumflow_llm_plugin_candidate():",
-      `    return {"task": ${JSON.stringify(task)}, "file": ${JSON.stringify(context.file)}, "status": "ready_for_review"}`,
+      `# LLM plugin local patch at ${now}: ${task}`,
+      "from typing import Any",
+      "",
+      "def normalize_runtime_payload(payload: dict[str, Any]) -> dict[str, Any]:",
+      "    title = str(payload.get(\"title\") or payload.get(\"name\") or \"\").strip()",
+      "    if not title:",
+      "        raise ValueError(\"title is required\")",
+      "    return {",
+      "        \"title\": title,",
+      "        \"owner\": str(payload.get(\"owner\") or \"负责人\").strip() or \"负责人\",",
+      "        \"priority\": str(payload.get(\"priority\") or \"normal\").strip(),",
+      "    }",
     ].join("\n");
   }
   return [
     "",
-    `// LLM plugin candidate generated locally at ${now}`,
-    "function quantumflowLlmPluginCandidate() {",
-    `  return { task: ${JSON.stringify(task)}, file: ${JSON.stringify(context.file)}, status: "ready_for_review" };`,
+    `// LLM plugin local patch at ${now}: ${task}`,
+    "async function refreshRuntimeTasks() {",
+    "  const response = await fetch('/api/tasks');",
+    "  if (!response.ok) throw new Error(`任务读取失败: ${response.status}`);",
+    "  const tasks = await response.json();",
+    "  return tasks.map((task) => ({",
+    "    ...task,",
+    "    displayStatus: statusText[task.status] || task.status,",
+    "    displayPriority: priorityText[task.priority] || task.priority,",
+    "  }));",
     "}",
   ].join("\n");
 }
@@ -2620,15 +2965,15 @@ async function submitAutoCodeTask(event) {
   if (!title) return;
   const owner = els.autoCodeOwner?.value || "frontend";
   const ownerAgent = agentById(owner) || agentById("frontend");
-  const command = `/code ${owner} ${title}`;
+  const command = `/code ${title}`;
   const button = els.autoCodeForm.querySelector("button");
   button.disabled = true;
   button.textContent = "Agent 编码中";
-  pushComment("你", `自动编码：交给 ${ownerAgent.name} 处理《${title}》。`);
+  pushComment("你", `自动编码：${ownerAgent.name} 作为主责沟通对象，Master 会拆给前端、后端、测试和 Reviewer 分文件实现《${title}》。`);
   try {
     if (!backendConnected) {
-      writeTaskCompletionCode({ id: Date.now(), title, backendId: `local-${Date.now()}` }, ownerAgent);
-      addLog("后端未连接，已先在本地代码区生成自动编码预览。", "System");
+      writeCollaborativeProjectCode({ id: Date.now(), title, backendId: `local-${Date.now()}`, owner });
+      addLog("后端未连接，已按前端/后端/测试/审查分工生成项目文件。", "System");
       return;
     }
     const response = await fetch("/api/bot/chat", {
@@ -2638,7 +2983,7 @@ async function submitAutoCodeTask(event) {
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || "auto code failed");
-    pushComment("QuantumFlow Bot", result.reply?.payload?.text || "已创建自动编码任务，Agent 正在执行。");
+    pushComment("QuantumFlow Bot", result.reply?.payload?.text || "已创建协同编码任务，多个 Agent 会分别写入自己的项目文件。");
     els.autoCodeInput.value = "";
     loadIssues();
     loadCodeArtifacts();
@@ -2661,12 +3006,12 @@ function selectAutoAgent(agentId, reason = "") {
 async function arbitrateAutoAgent() {
   const title = els.autoCodeInput?.value.trim() || "";
   if (!title) {
-    if (els.agentArbitrationNote) els.agentArbitrationNote.textContent = "Master 会根据需求自动推荐最合适的 Agent。";
+    if (els.agentArbitrationNote) els.agentArbitrationNote.textContent = "选择的是主责沟通对象；执行时仍会按职责拆给所有 Agent。";
     return;
   }
   if (!backendConnected) {
     const localOwner = localAgentRecommendation(title);
-    selectAutoAgent(localOwner, `本地仲裁推荐：${agentById(localOwner)?.name || localOwner}`);
+    selectAutoAgent(localOwner, `主责推荐：${agentById(localOwner)?.name || localOwner}；仍会分派所有 Agent 写各自文件`);
     return;
   }
   try {
@@ -2679,10 +3024,10 @@ async function arbitrateAutoAgent() {
     if (!response.ok) throw new Error(result.detail || "arbitration failed");
     const recommended = result.recommended_agent || "frontend";
     const top = (result.scores || []).find((item) => item.agent_id === recommended);
-    selectAutoAgent(recommended, `Master 推荐：${top?.label || recommended} 路 score ${top?.score ?? "-"}`);
+    selectAutoAgent(recommended, `主责推荐：${top?.label || recommended} 路 score ${top?.score ?? "-"}；仍会分派所有 Agent`);
   } catch {
     const localOwner = localAgentRecommendation(title);
-    selectAutoAgent(localOwner, `本地仲裁推荐：${agentById(localOwner)?.name || localOwner}`);
+    selectAutoAgent(localOwner, `主责推荐：${agentById(localOwner)?.name || localOwner}；仍会分派所有 Agent 写各自文件`);
   }
 }
 
@@ -3178,6 +3523,12 @@ async function applyActivePatchCandidate() {
 
 function validateGeneratedCode(lines) {
   const joined = lines.join("\n");
+  if (/<template>[\s\S]*\{\{/.test(joined) || /v-for|v-model|@click|@submit/.test(joined)) {
+    if (!joined.includes("<script setup>") && joined.includes("</template>")) {
+      return { ok: false, reason: "Vue 单文件组件缺少 <script setup>。" };
+    }
+    return { ok: true };
+  }
   const pairs = [
     ["(", ")"],
     ["{", "}"],
@@ -3202,55 +3553,541 @@ function sanitizeCodeText(value) {
     .slice(0, 180);
 }
 
+function inferBusinessSpec(title) {
+  const text = String(title || "").toLowerCase();
+  const frontendOnly = /(前端|frontend|ui|页面|界面)/.test(text) && !/(后端|接口|api|数据库|全栈|fullstack)/.test(text);
+  const framework = /(vue3|vue 3|vue)/.test(text) ? "vue3" : "vanilla";
+  const base = {
+    domain: "generic",
+    framework,
+    scope: frontendOnly ? "frontend_only" : "fullstack",
+    entityLabel: "业务事项",
+    ownerLabel: "负责人",
+    seedItems: ["需求确认", "执行推进", "结果验收"],
+  };
+  if (/(图书|图书馆|书籍|借阅|library|book)/.test(text)) {
+    return {
+      ...base,
+      domain: "library",
+      entityLabel: "图书",
+      ownerLabel: "馆藏管理员",
+      seedItems: ["人月神话", "代码大全", "深入理解计算机系统"],
+    };
+  }
+  if (/(客户|crm|客服|销售)/.test(text)) {
+    return { ...base, domain: "crm", entityLabel: "客户", ownerLabel: "客户经理", seedItems: ["重点客户跟进", "合同续签提醒", "售后问题处理"] };
+  }
+  if (/(订单|电商|商城|交易)/.test(text)) {
+    return { ...base, domain: "order", entityLabel: "订单", ownerLabel: "运营负责人", seedItems: ["待支付订单", "发货异常订单", "售后退款订单"] };
+  }
+  if (/(员工|人事|hr|考勤)/.test(text)) {
+    return { ...base, domain: "hr", entityLabel: "员工事项", ownerLabel: "HR 负责人", seedItems: ["入职资料确认", "考勤异常处理", "绩效面谈安排"] };
+  }
+  if (/(项目|研发|开发|代码|仓库)/.test(text)) {
+    return { ...base, domain: "development", entityLabel: "开发任务", ownerLabel: "技术负责人", seedItems: ["前端页面实现", "后端接口联调", "测试验收通过"] };
+  }
+  return base;
+}
+
+function isVue3FrontendSpec(spec) {
+  return spec.scope === "frontend_only" && spec.framework === "vue3";
+}
+
+function vue3BookSeedItems() {
+  return [
+    { title: "人月神话", author: "Frederick P. Brooks", category: "软件工程", status: "在馆" },
+    { title: "代码大全", author: "Steve McConnell", category: "编程实践", status: "借出" },
+    { title: "深入理解计算机系统", author: "Randal E. Bryant", category: "计算机系统", status: "预约" },
+  ];
+}
+
+function preferredProjectEntryFile(taskLike = {}) {
+  const spec = inferBusinessSpec(taskLike.title || "");
+  return isVue3FrontendSpec(spec) ? "src/App.vue" : "app/static/app.js";
+}
+
 function buildAgentArtifactLines(agentId, taskLike = {}, fileName = "") {
   const agent = agentById(agentId) || { id: agentId, role: "Agent", name: agentId };
   const taskId = sanitizeCodeText(taskLike.id || taskLike.backendId || `local-${Date.now().toString(36)}`);
   const title = sanitizeCodeText(taskLike.title || "QuantumFlow 自动任务");
   const branch = sanitizeCodeText(taskLike.branch || "main");
+  const spec = inferBusinessSpec(title);
 
-  if (fileName.endsWith(".py")) {
+  if (isVue3FrontendSpec(spec) && fileName.endsWith("package.json")) {
     return [
-      "",
-      `# generated by ${agent.role}: ${title}`,
-      "def quantumflow_generated_result():",
-      "    return {",
-      `        "task_id": "${taskId}",`,
-      `        "title": "${title}",`,
-      `        "branch": "${branch}",`,
-      `        "agent": "${agent.id}",`,
-      '        "status": "ready_for_review",',
-      '        "checks": ["syntax", "ownership", "runtime_context"],',
-      "    }",
+      "{",
+      `  "name": "${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "quantumflow-vue3-library"}",`,
+      "  \"version\": \"0.1.0\",",
+      "  \"private\": true,",
+      "  \"type\": \"module\",",
+      "  \"scripts\": {",
+      "    \"dev\": \"vite --host 127.0.0.1\",",
+      "    \"build\": \"vite build\",",
+      "    \"test\": \"node tests/book.spec.js\"",
+      "  },",
+      "  \"dependencies\": {",
+      "    \"@vitejs/plugin-vue\": \"^5.0.0\",",
+      "    \"vite\": \"^5.0.0\",",
+      "    \"vue\": \"^3.4.0\"",
+      "  },",
+      "  \"devDependencies\": {}",
+      "}",
     ];
   }
 
-  if (fileName.endsWith(".md")) {
+  if (isVue3FrontendSpec(spec) && fileName.endsWith("index.html")) {
     return [
+      "<!doctype html>",
+      "<html lang=\"zh-CN\">",
+      "  <head>",
+      "    <meta charset=\"UTF-8\" />",
+      "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />",
+      "    <title>Vue3 图书管理系统</title>",
+      "    <link rel=\"stylesheet\" href=\"/src/style.css\" />",
+      "  </head>",
+      "  <body>",
+      "    <div id=\"app\"></div>",
+      "    <script type=\"module\" src=\"/src/main.js\"></script>",
+      "  </body>",
+      "</html>",
+    ];
+  }
+
+  if (isVue3FrontendSpec(spec) && fileName.endsWith("src/main.js")) {
+    return [
+      "import { createApp } from \"https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js\";",
       "",
-      `## ${agent.name} 交付记录`,
+      "import App from \"./App.vue\";",
+      "",
+      "createApp(App).mount(\"#app\");",
+    ];
+  }
+
+  if (isVue3FrontendSpec(spec) && fileName.endsWith("src/App.vue")) {
+    const books = JSON.stringify(vue3BookSeedItems(), null, 2);
+    return [
+      "<script setup>",
+      "import { computed, reactive } from \"vue\";",
+      "",
+      "const state = reactive({",
+      `  taskId: "${taskId}",`,
+      `  title: "${title}",`,
+      "  keyword: \"\",",
+      "  category: \"全部\",",
+      "  status: \"全部\",",
+      "  form: { title: \"\", author: \"\", category: \"综合\", status: \"在馆\" },",
+      `  books: ${books}.map((book, index) => ({ id: index + 1, ...book })),`,
+      "});",
+      "",
+      "const categories = computed(() => [\"全部\", ...new Set(state.books.map((book) => book.category))]);",
+      "const statusOptions = [\"全部\", \"在馆\", \"借出\", \"预约\"];",
+      "const filteredBooks = computed(() => {",
+      "  const keyword = state.keyword.trim().toLowerCase();",
+      "  return state.books.filter((book) => {",
+      "    const text = `${book.title} ${book.author} ${book.category} ${book.status}`.toLowerCase();",
+      "    return (!keyword || text.includes(keyword)) &&",
+      "      (state.category === \"全部\" || book.category === state.category) &&",
+      "      (state.status === \"全部\" || book.status === state.status);",
+      "  });",
+      "});",
+      "const stats = computed(() => ({",
+      "  total: state.books.length,",
+      "  available: state.books.filter((book) => book.status === \"在馆\").length,",
+      "  borrowed: state.books.filter((book) => book.status === \"借出\").length,",
+      "  reserved: state.books.filter((book) => book.status === \"预约\").length,",
+      "}));",
+      "",
+      "function addBook() {",
+      "  if (!state.form.title.trim() || !state.form.author.trim()) return;",
+      "  state.books.unshift({ id: Date.now(), ...state.form });",
+      "  state.form = { title: \"\", author: \"\", category: \"综合\", status: \"在馆\" };",
+      "}",
+      "",
+      "function cycleStatus(book) {",
+      "  const flow = [\"在馆\", \"借出\", \"预约\"];",
+      "  book.status = flow[(flow.indexOf(book.status) + 1) % flow.length];",
+      "}",
+      "</script>",
+      "",
+      "<template>",
+      "  <main class=\"library-shell\">",
+      "    <section class=\"hero\">",
+      "      <span>Vue3 Library Console</span>",
+      "      <h1>{{ state.title }}</h1>",
+      "      <p>图书搜索、分类筛选、新增图书和借阅状态管理。</p>",
+      "    </section>",
+      "    <section class=\"stats\">",
+      "      <article><strong>{{ stats.total }}</strong><span>馆藏总数</span></article>",
+      "      <article><strong>{{ stats.available }}</strong><span>在馆</span></article>",
+      "      <article><strong>{{ stats.borrowed }}</strong><span>借出</span></article>",
+      "      <article><strong>{{ stats.reserved }}</strong><span>预约</span></article>",
+      "    </section>",
+      "    <section class=\"toolbar\">",
+      "      <input v-model=\"state.keyword\" placeholder=\"搜索书名、作者、分类或状态\" />",
+      "      <select v-model=\"state.category\"><option v-for=\"item in categories\" :key=\"item\">{{ item }}</option></select>",
+      "      <select v-model=\"state.status\"><option v-for=\"item in statusOptions\" :key=\"item\">{{ item }}</option></select>",
+      "    </section>",
+      "    <form class=\"book-form\" @submit.prevent=\"addBook\">",
+      "      <input v-model=\"state.form.title\" placeholder=\"书名\" />",
+      "      <input v-model=\"state.form.author\" placeholder=\"作者\" />",
+      "      <input v-model=\"state.form.category\" placeholder=\"分类\" />",
+      "      <select v-model=\"state.form.status\"><option>在馆</option><option>借出</option><option>预约</option></select>",
+      "      <button>新增图书</button>",
+      "    </form>",
+      "    <section class=\"book-grid\">",
+      "      <article v-for=\"book in filteredBooks\" :key=\"book.id\" class=\"book-card\">",
+      "        <div><strong>{{ book.title }}</strong><span>{{ book.author }} / {{ book.category }}</span></div>",
+      "        <button :class=\"'status-' + book.status\" @click=\"cycleStatus(book)\">{{ book.status }}</button>",
+      "      </article>",
+      "    </section>",
+      "  </main>",
+      "</template>",
+    ];
+  }
+
+  if (isVue3FrontendSpec(spec) && fileName.endsWith("src/style.css")) {
+    return [
+      ":root { color-scheme: dark; font-family: Inter, 'Microsoft YaHei', sans-serif; }",
+      "* { box-sizing: border-box; }",
+      "body { margin: 0; min-height: 100vh; background: #080d18; color: #edf3ff; }",
+      ".library-shell { width: min(1180px, calc(100vw - 32px)); margin: 0 auto; padding: 32px 0; }",
+      ".hero, .stats article, .toolbar, .book-form, .book-card { border: 1px solid #26365f; background: #101827; border-radius: 8px; }",
+      ".hero { padding: 30px; }",
+      ".hero span { color: #2fe098; font-weight: 900; }",
+      ".hero h1 { margin: 8px 0 10px; font-size: clamp(30px, 4vw, 52px); }",
+      ".hero p, .stats span, .book-card span { color: #9fb0cc; }",
+      ".stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 16px 0; }",
+      ".stats article { padding: 18px; }",
+      ".stats strong { display: block; font-size: 30px; }",
+      ".toolbar, .book-form { display: grid; grid-template-columns: 1fr 180px 180px; gap: 10px; padding: 12px; margin-bottom: 12px; }",
+      ".book-form { grid-template-columns: 1fr 180px 160px 140px 120px; }",
+      "input, select, button { height: 42px; border: 1px solid #2d3b67; border-radius: 7px; background: #0d1428; color: #edf3ff; padding: 0 12px; }",
+      "button { cursor: pointer; font-weight: 800; }",
+      ".book-form button { background: #1097a7; border-color: #21d6e7; }",
+      ".book-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }",
+      ".book-card { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 16px; }",
+      ".book-card strong, .book-card span { display: block; }",
+      ".book-card strong { margin-bottom: 6px; }",
+      ".status-在馆 { border-color: #2fe098; color: #2fe098; }",
+      ".status-借出 { border-color: #ffc44d; color: #ffc44d; }",
+      ".status-预约 { border-color: #21d6e7; color: #21d6e7; }",
+      "@media (max-width: 820px) { .stats, .toolbar, .book-form { grid-template-columns: 1fr; } .book-card { align-items: flex-start; flex-direction: column; } .book-card button { width: 100%; } }",
+    ];
+  }
+
+  if (isVue3FrontendSpec(spec) && fileName.endsWith("tests/book.spec.js")) {
+    return [
+      "import assert from \"node:assert/strict\";",
+      "import fs from \"node:fs\";",
+      "",
+      "const html = fs.readFileSync(\"index.html\", \"utf8\");",
+      "const main = fs.readFileSync(\"src/main.js\", \"utf8\");",
+      "const vue = fs.readFileSync(\"src/App.vue\", \"utf8\");",
+      "",
+      "assert.match(html, /id=\"app\"/);",
+      "assert.match(main, /createApp/);",
+      "assert.match(vue, /图书搜索/);",
+      "assert.match(vue, /新增图书/);",
+      "assert.match(vue, /借出/);",
+      "assert.match(vue, /filteredBooks/);",
+      "",
+      `console.log("vue3 library frontend smoke ok: ${taskId}");`,
+    ];
+  }
+
+  if (isVue3FrontendSpec(spec) && fileName.endsWith("docs/api-assumption.md")) {
+    return [
+      "# API 约束说明",
+      "",
+      `任务：${title}`,
+      "",
+      "本次需求被识别为 Vue3 前端页面任务，因此 Backend Agent 不强行生成后端服务。",
+      "如果后续要接真实接口，建议保持以下契约：",
+      "",
+      "- `GET /api/books`：读取图书列表。",
+      "- `POST /api/books`：新增图书。",
+      "- `PATCH /api/books/{id}`：更新借阅状态。",
+    ];
+  }
+
+  if (isVue3FrontendSpec(spec) && fileName.endsWith("docs/review-checklist.md")) {
+    return [
+      "# Reviewer 审查清单",
       "",
       `- 任务：${title}`,
+      `- 任务 ID：${taskId}`,
       `- 分支：${branch}`,
-      `- Agent：${agent.role}`,
-      "- 状态：ready_for_review",
-      "- 验收：语法结构、任务归属、外部消息回传路径均已记录。",
+      "- 识别结果：Vue3 图书管理前端",
+      "",
+      "## 必须通过",
+      "",
+      "- [x] 需求被识别为图书管理系统，不再生成通用任务管理模板。",
+      "- [x] 范围被识别为前端-only，不强行生成后端服务。",
+      "- [x] 前端 Agent 提供 `src/App.vue`、`src/main.js`、`src/style.css`。",
+      "- [x] 页面包含图书搜索、分类筛选、状态筛选、新增图书和状态切换。",
+      "- [x] 测试 Agent 提供 `tests/book.spec.js` 检查 Vue3 挂载点和核心业务文案。",
+    ];
+  }
+
+  if (fileName.endsWith("app/main.py")) {
+    return [
+      "from __future__ import annotations",
+      "",
+      "import sqlite3",
+      "from datetime import datetime",
+      "from pathlib import Path",
+      "from typing import Any",
+      "",
+      "from fastapi import FastAPI, HTTPException",
+      "from fastapi.responses import FileResponse",
+      "from fastapi.staticfiles import StaticFiles",
+      "from pydantic import BaseModel, Field",
+      "",
+      "ROOT = Path(__file__).resolve().parent",
+      "DB_PATH = ROOT / \"business.db\"",
+      "STATIC_ROOT = ROOT / \"static\"",
+      "ALLOWED_STATUS = {\"pending\", \"active\", \"blocked\", \"done\"}",
+      `SEED_ITEMS = ${JSON.stringify(spec.seedItems)}`,
+      `app = FastAPI(title="${title}", version="1.0.0")`,
+      "app.mount(\"/static\", StaticFiles(directory=STATIC_ROOT), name=\"static\")",
+      "",
+      "class TaskCreate(BaseModel):",
+      "    title: str = Field(min_length=1, max_length=180)",
+      `    owner: str = Field(default="${spec.ownerLabel}", max_length=60)`,
+      "    priority: str = Field(default=\"normal\", pattern=\"^(normal|high|urgent)$\")",
+      "",
+      "class TaskUpdate(BaseModel):",
+      "    status: str",
+      "",
+      "def connect() -> sqlite3.Connection:",
+      "    conn = sqlite3.connect(DB_PATH)",
+      "    conn.row_factory = sqlite3.Row",
+      "    return conn",
+      "",
+      "def init_db() -> None:",
+      "    with connect() as conn:",
+      "        conn.execute(\"\"\"CREATE TABLE IF NOT EXISTS task (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, owner TEXT NOT NULL, priority TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)\"\"\")",
+      "        conn.execute(\"\"\"CREATE TABLE IF NOT EXISTS event (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER, message TEXT NOT NULL, created_at TEXT NOT NULL)\"\"\")",
+      "        count = conn.execute(\"SELECT COUNT(*) FROM task\").fetchone()[0]",
+      "        if count == 0:",
+      "            now = datetime.now().isoformat(timespec=\"seconds\")",
+      "            for index, item in enumerate(SEED_ITEMS):",
+      "                priority = \"high\" if index == 0 else \"normal\"",
+      `                conn.execute("INSERT INTO task(title, owner, priority, status, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?)", (item, "${spec.ownerLabel}", priority, now, now))`,
+      "",
+      "def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:",
+      "    return {key: row[key] for key in row.keys()}",
+      "",
+      "@app.on_event(\"startup\")",
+      "def startup() -> None:",
+      "    init_db()",
+      "",
+      "@app.get(\"/\")",
+      "def index() -> FileResponse:",
+      "    return FileResponse(STATIC_ROOT / \"index.html\")",
+      "",
+      "@app.get(\"/api/health\")",
+      "def health() -> dict[str, str]:",
+      `    return {"ok": "true", "service": "${title}", "task_id": "${taskId}", "entity": "${spec.entityLabel}"}`,
+      "",
+      "@app.get(\"/api/tasks\")",
+      "def list_tasks() -> list[dict[str, Any]]:",
+      "    init_db()",
+      "    with connect() as conn:",
+      "        rows = conn.execute(\"SELECT * FROM task ORDER BY id DESC\").fetchall()",
+      "    return [row_to_dict(row) for row in rows]",
+      "",
+      "@app.post(\"/api/tasks\")",
+      "def create_task(payload: TaskCreate) -> dict[str, Any]:",
+      "    now = datetime.now().isoformat(timespec=\"seconds\")",
+      "    with connect() as conn:",
+      `        cursor = conn.execute("INSERT INTO task(title, owner, priority, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)", (payload.title.strip(), payload.owner.strip() or "${spec.ownerLabel}", payload.priority, "pending", now, now))`,
+      "        new_id = cursor.lastrowid",
+      "        conn.execute(\"INSERT INTO event(task_id, message, created_at) VALUES (?, ?, ?)\", (new_id, \"任务已创建\", now))",
+      "        row = conn.execute(\"SELECT * FROM task WHERE id = ?\", (new_id,)).fetchone()",
+      "    return row_to_dict(row)",
+      "",
+      "@app.patch(\"/api/tasks/{task_id}\")",
+      "def update_task(task_id: int, payload: TaskUpdate) -> dict[str, Any]:",
+      "    status = payload.status.strip()",
+      "    if status not in ALLOWED_STATUS:",
+      "        raise HTTPException(status_code=400, detail=\"不支持的任务状态\")",
+      "    now = datetime.now().isoformat(timespec=\"seconds\")",
+      "    with connect() as conn:",
+      "        cursor = conn.execute(\"UPDATE task SET status = ?, updated_at = ? WHERE id = ?\", (status, now, task_id))",
+      "        if cursor.rowcount == 0:",
+      "            raise HTTPException(status_code=404, detail=\"任务不存在\")",
+      "        conn.execute(\"INSERT INTO event(task_id, message, created_at) VALUES (?, ?, ?)\", (task_id, f\"状态更新为 {status}\", now))",
+      "        row = conn.execute(\"SELECT * FROM task WHERE id = ?\", (task_id,)).fetchone()",
+      "    return row_to_dict(row)",
+    ];
+  }
+
+  if (fileName.endsWith("tests/test_smoke.py")) {
+    return [
+      "from fastapi.testclient import TestClient",
+      "",
+      "from app.main import app",
+      "",
+      "def test_health_and_task_flow():",
+      "    with TestClient(app) as client:",
+      "        health = client.get(\"/api/health\")",
+      "        assert health.status_code == 200",
+      `        assert health.json()["task_id"] == "${taskId}"`,
+      `        assert health.json()["entity"] == "${spec.entityLabel}"`,
+      "        initial = client.get(\"/api/tasks\")",
+      "        assert initial.status_code == 200",
+      "        assert len(initial.json()) >= 3",
+      `        created = client.post("/api/tasks", json={"title": "${title}", "owner": "测试 Agent", "priority": "high"})`,
+      "        assert created.status_code == 200",
+      "        new_id = created.json()[\"id\"]",
+      "        updated = client.patch(f\"/api/tasks/{new_id}\", json={\"status\": \"done\"})",
+      "        assert updated.status_code == 200",
+      "        assert updated.json()[\"status\"] == \"done\"",
+      "        listed = client.get(\"/api/tasks\")",
+      "        assert listed.status_code == 200",
+      "        assert any(item[\"id\"] == new_id for item in listed.json())",
+    ];
+  }
+
+  if (fileName.endsWith("docs/review-checklist.md")) {
+    return [
+      "# Reviewer 审查清单",
+      "",
+      `- 任务：${title}`,
+      `- 任务 ID：${taskId}`,
+      `- 分支：${branch}`,
+      `- 业务实体：${spec.entityLabel}`,
+      "",
+      "## 必须通过",
+      "",
+      "- [x] 后端 Agent 独立提供 API、SQLite 和业务初始数据。",
+      "- [x] 前端 Agent 独立提供列表、搜索筛选、状态按钮和接口联动。",
+      "- [x] 测试 Agent 独立覆盖健康检查、初始数据、创建、更新和列表读取。",
+      "- [x] 状态展示中文化，接口状态值保持英文以便程序处理。",
+    ];
+  }
+
+  if (fileName.endsWith("app/static/app.js")) {
+    return [
+      `const state = { taskId: "${taskId}", title: "${title}", entityLabel: "${spec.entityLabel}", tasks: [], filters: { status: "all", query: "" } };`,
+      "const statusText = { pending: \"等待\", active: \"进行中\", blocked: \"阻塞\", done: \"完成\" };",
+      "const priorityText = { normal: \"普通\", high: \"高\", urgent: \"紧急\" };",
+      "const els = {",
+      "  list: document.getElementById(\"taskList\"),",
+      "  form: document.getElementById(\"taskForm\"),",
+      "  title: document.getElementById(\"taskTitle\"),",
+      "  owner: document.getElementById(\"taskOwner\"),",
+      "  priority: document.getElementById(\"taskPriority\"),",
+      "  query: document.getElementById(\"taskSearch\"),",
+      "  statTotal: document.getElementById(\"statTotal\"),",
+      "  statActive: document.getElementById(\"statActive\"),",
+      "  statDone: document.getElementById(\"statDone\"),",
+      "};",
+      "async function api(path, options = {}) {",
+      "  const response = await fetch(path, { ...options, headers: { \"Content-Type\": \"application/json\", ...(options.headers || {}) } });",
+      "  const data = await response.json().catch(() => ({}));",
+      "  if (!response.ok) throw new Error(data.detail || `请求失败: ${response.status}`);",
+      "  return data;",
+      "}",
+      "async function loadTasks() { state.tasks = await api(\"/api/tasks\"); render(); }",
+      "function visibleTasks() {",
+      "  const query = state.filters.query.trim().toLowerCase();",
+      "  return state.tasks.filter((task) => {",
+      "    const matchesStatus = state.filters.status === \"all\" || task.status === state.filters.status;",
+      "    const text = `${task.title} ${task.owner} ${task.priority} ${task.status}`.toLowerCase();",
+      "    return matchesStatus && (!query || text.includes(query));",
+      "  });",
+      "}",
+      "function render() {",
+      "  const tasks = visibleTasks();",
+      "  els.statTotal.textContent = String(state.tasks.length);",
+      "  els.statActive.textContent = String(state.tasks.filter((task) => task.status === \"active\").length);",
+      "  els.statDone.textContent = String(state.tasks.filter((task) => task.status === \"done\").length);",
+      "  els.list.innerHTML = tasks.length ? tasks.map(renderTask).join(\"\") : `<p class=\"empty\">暂无匹配${state.entityLabel}，先创建一个。</p>`;",
+      "}",
+      "function renderTask(task) {",
+      "  return `<article class=\"task-card status-${task.status}\"><div><strong>${escapeHtml(task.title)}</strong><small>${escapeHtml(task.owner)} / ${priorityText[task.priority] || task.priority} / ${statusText[task.status] || task.status}</small></div><div class=\"actions\">${Object.entries(statusText).map(([status, label]) => `<button data-id=\"${task.id}\" data-status=\"${status}\">${label}</button>`).join(\"\")}</div></article>`;",
+      "}",
+      "function escapeHtml(value) { return String(value || \"\").replace(/[&<>\"']/g, (char) => ({ \"&\": \"&amp;\", \"<\": \"&lt;\", \">\": \"&gt;\", '\"': \"&quot;\", \"'\": \"&#039;\" }[char])); }",
+      "els.form.addEventListener(\"submit\", async (event) => {",
+      "  event.preventDefault();",
+      `  await api("/api/tasks", { method: "POST", body: JSON.stringify({ title: els.title.value, owner: els.owner.value || "${spec.ownerLabel}", priority: els.priority.value }) });`,
+      "  els.form.reset();",
+      `  els.owner.value = "${spec.ownerLabel}";`,
+      "  await loadTasks();",
+      "});",
+      "els.query.addEventListener(\"input\", () => { state.filters.query = els.query.value; render(); });",
+      "document.querySelectorAll(\"[data-filter]\").forEach((button) => {",
+      "  button.addEventListener(\"click\", () => {",
+      "    state.filters.status = button.dataset.filter;",
+      "    document.querySelectorAll(\"[data-filter]\").forEach((item) => item.classList.toggle(\"active\", item === button));",
+      "    render();",
+      "  });",
+      "});",
+      "els.list.addEventListener(\"click\", async (event) => {",
+      "  const button = event.target.closest(\"button[data-id]\");",
+      "  if (!button) return;",
+      "  await api(`/api/tasks/${button.dataset.id}`, { method: \"PATCH\", body: JSON.stringify({ status: button.dataset.status }) });",
+      "  await loadTasks();",
+      "});",
+      "loadTasks();",
+    ];
+  }
+
+  if (isVue3FrontendSpec(spec) && fileName.endsWith("README.md")) {
+    return [
+      `# ${title}`,
+      "",
+      "这是 QuantumFlow 根据任务语义生成的 Vue3 图书管理前端项目。",
+      "",
+      "## 需求理解",
+      "",
+      "- 业务领域：图书管理 / 馆藏管理",
+      "- 技术栈：Vue3",
+      "- 开发范围：前端页面，不强行生成后端任务系统",
+      "- 核心功能：图书搜索、分类筛选、状态筛选、新增图书、借出/归还/预约状态切换、统计面板",
+      "",
+      "## Agent 分工",
+      "",
+      "- 前端 Agent：生成 `src/main.js`、`src/App.vue`、`src/style.css`",
+      "- 测试 Agent：生成 `tests/book.spec.js`，检查关键业务文案和 Vue3 挂载点",
+      "- Reviewer：生成 `docs/review-checklist.md`",
+      "- 团队负责人：汇总项目结构和运行说明",
+      "",
+      "## 运行",
+      "",
+      "```powershell",
+      "npm install",
+      "npm run dev",
+      "```",
+      "",
+      `任务 ID：${taskId}`,
     ];
   }
 
   return [
+    `# ${title}`,
     "",
-    `// generated by ${agent.role}: ${title}`,
-    "const quantumflowGeneratedResult = {",
-    `  taskId: "${taskId}",`,
-    `  title: "${title}",`,
-    `  branch: "${branch}",`,
-    `  agent: "${agent.id}",`,
-    '  status: "ready_for_review",',
-    '  checks: ["syntax", "ownership", "runtime_context"],',
-    "};",
-    "window.quantumflowGeneratedResults = window.quantumflowGeneratedResults || [];",
-    "window.quantumflowGeneratedResults.push(quantumflowGeneratedResult);",
+    "由 QuantumFlow Agent 生成的完整系统项目。",
+    "",
+    `业务实体：${spec.entityLabel}`,
+    "",
+    "- `app/main.py`：FastAPI 后端、SQLite 存储和任务 API。",
+    "- `app/static/app.js`：任务看板前端交互。",
+    "- `tests/test_smoke.py`：端到端烟测。",
+    "- `docs/review-checklist.md`：Reviewer 审查清单。",
   ];
+}
+
+function isLegacyStubArtifact(codeText = "", targetKey = "") {
+  const text = String(codeText || "");
+  return (
+    /def\s+task_api_task_\w+\s*\(/.test(text) ||
+    /def\s+\w+_summary_task_\w+\s*\(/.test(text) ||
+    /quantumflow_generated_result|quantumflow_llm_plugin_candidate|quantumflowGeneratedResult/.test(text) ||
+    (targetKey === "runtime/server.py" && /ready_for_review/.test(text) && /return\s*\{/.test(text))
+  );
 }
 
 
@@ -3292,6 +4129,10 @@ function applySnapshot(snapshot) {
   const incomingAgents = snapshot.agents || [];
   const incomingTasks = snapshot.tasks || [];
   const incomingEvents = snapshot.events || [];
+  const incomingDeliveries = Array.isArray(snapshot.deliveries) ? snapshot.deliveries : [];
+  if (Date.now() < suppressNonEmptyTaskSnapshotUntil && (incomingTasks.length || incomingDeliveries.length)) {
+    return;
+  }
   backendQueueStats = snapshot.queue || backendQueueStats;
   projectDeliveries = Array.isArray(snapshot.deliveries) ? snapshot.deliveries : projectDeliveries;
 
@@ -3308,7 +4149,7 @@ function applySnapshot(snapshot) {
     .forEach((task) => {
       const owner = agentById(task.owner_id);
       if (owner) {
-        writeTaskCompletionCode(
+        writeCollaborativeProjectCode(
           {
             id: task.id,
             backendId: task.id,
@@ -3318,7 +4159,6 @@ function applySnapshot(snapshot) {
             status: task.status,
             source: task.source || "quantumflow",
           },
-          owner,
         );
         codedTaskKeys.add(task.id);
       }
@@ -3346,8 +4186,8 @@ function applySnapshot(snapshot) {
     .forEach((event) => addLog(event.message, agentById(event.agent_id)?.name || event.agent_id));
 }
 
-function runTask(index = currentTaskIndex + 1) {
-  if (backendConnected && socket) {
+function runTask(index = currentTaskIndex + 1, options = {}) {
+  if (backendConnected && socket && !options.local) {
     socket.send(JSON.stringify({ command: "dispatch_next" }));
     return;
   }
@@ -3360,7 +4200,14 @@ function runTask(index = currentTaskIndex + 1) {
 
   currentTaskIndex = index;
   const task = tasks[index];
+  if (!task) return;
   const owner = agentById(task.owner);
+  if (!owner) return;
+  if (task.status === "assigned" && !options.local) {
+    selectedAgentId = owner.id;
+    openWorkerAcceptPanel(owner, task);
+    return;
+  }
   selectedAgentId = owner.id;
   task.status = "active";
 
@@ -3393,8 +4240,19 @@ function runTask(index = currentTaskIndex + 1) {
 }
 
 function finishTask(task, owner) {
+  if (task.requiresReview) {
+    task.status = "review";
+    writeTaskCompletionCode(task, owner);
+    setAgent(owner.id, { status: "done", x: owner.home[0], y: owner.home[1] });
+    setAgent("reviewer", { status: "idle", x: agentById("reviewer").home[0], y: agentById("reviewer").home[1] });
+    addLog(`执行完成，等待 Reviewer 审核：${task.workflowTitle || task.title}`, owner.name);
+    pushComment(owner.name, `已完成 ${task.workflowTitle || task.title}，提交给代码负责人审核。`);
+    renderTasks();
+    updateMetrics();
+    return;
+  }
   task.status = "done";
-  writeTaskCompletionCode(task, owner);
+  writeCollaborativeProjectCode(task);
   setAgent(owner.id, { status: "done", x: owner.home[0], y: owner.home[1] });
   setAgent("reviewer", { status: "idle", x: agentById("reviewer").home[0], y: agentById("reviewer").home[1] });
   addLog(`任务完成：${task.title}`, owner.name);
@@ -3432,9 +4290,6 @@ function streamCodeLines({ repoId, fileName, lines, agentName = "Agent", taskTit
     streamingCodeLineIndex = current.length - 1;
     renderCommunity();
     els.repoCodeView?.scrollTo({ top: els.repoCodeView.scrollHeight, behavior: "smooth" });
-    if (index === 0 || index === lines.length - 1 || index % 2 === 0) {
-      pushComment(agentName, `正在写入第 ${index + 1}/${lines.length} 行：${lines[index].slice(0, 54)}`, "streaming", key);
-    }
     index += 1;
     if (index >= lines.length) {
       window.clearInterval(timer);
@@ -3451,13 +4306,73 @@ window.quantumflowStreamCodeLines = streamCodeLines;
 globalThis.quantumflowStreamCodeLines = streamCodeLines;
 restoreAuthSession();
 
+function collaborativeProjectPlan(task) {
+  const spec = inferBusinessSpec(task.title || "");
+  const items = isVue3FrontendSpec(spec)
+    ? [
+        { agentId: "master", repoId: "project", fileName: "README.md" },
+        { agentId: "frontend", repoId: "project", fileName: "package.json" },
+        { agentId: "frontend", repoId: "project", fileName: "index.html" },
+        { agentId: "frontend", repoId: "project", fileName: "src/main.js" },
+        { agentId: "frontend", repoId: "project", fileName: "src/App.vue" },
+        { agentId: "frontend", repoId: "project", fileName: "src/style.css" },
+        { agentId: "tester", repoId: "project", fileName: "tests/book.spec.js" },
+        { agentId: "reviewer", repoId: "project", fileName: "docs/review-checklist.md" },
+      ]
+    : [
+    { agentId: "frontend", repoId: "project", fileName: "app/static/app.js" },
+    { agentId: "backend", repoId: "project", fileName: "app/main.py" },
+    { agentId: "tester", repoId: "project", fileName: "tests/test_smoke.py" },
+    { agentId: "reviewer", repoId: "project", fileName: "docs/review-checklist.md" },
+    { agentId: "master", repoId: "project", fileName: "README.md" },
+  ];
+  return items.map((item) => {
+    const agent = agentById(item.agentId) || agentById("master");
+    return {
+      ...item,
+      agent,
+      lines: buildAgentArtifactLines(item.agentId, task, item.fileName),
+    };
+  });
+}
+
+function writeCollaborativeProjectCode(task) {
+  const plan = collaborativeProjectPlan(task);
+  plan.forEach((item, index) => {
+    window.setTimeout(() => {
+      streamCodeLines({
+        repoId: item.repoId,
+        fileName: item.fileName,
+        agentName: item.agent.name,
+        taskTitle: `${task.title} / ${item.fileName}`,
+        lines: item.lines,
+        replace: true,
+      });
+    }, index * 260);
+  });
+  window.setTimeout(() => {
+    activeRepoId = "project";
+    activeFileName = preferredProjectEntryFile(task);
+    renderCommunity();
+  }, plan.length * 280 + 180);
+}
+
 function writeTaskCompletionCode(task, owner) {
-  const map = {
-    master: ["runtime", "Agent.py"],
-    frontend: ["desktop", "app.js"],
-    backend: ["runtime", "server.py"],
-    reviewer: ["runtime", "Agent.py"],
-    tester: ["connectors", "feishu.md"],
+  const spec = inferBusinessSpec(task.workflowTitle || task.title || "");
+  const map = isVue3FrontendSpec(spec)
+    ? {
+        master: ["project", "README.md"],
+        frontend: ["project", "src/App.vue"],
+        backend: ["project", "docs/api-assumption.md"],
+        reviewer: ["project", "docs/review-checklist.md"],
+        tester: ["project", "tests/book.spec.js"],
+      }
+    : {
+    master: ["project", "README.md"],
+    frontend: ["project", "app/static/app.js"],
+    backend: ["project", "app/main.py"],
+    reviewer: ["project", "docs/review-checklist.md"],
+    tester: ["project", "tests/test_smoke.py"],
   };
   const target = map[owner.id] || ["runtime", "server.py"];
   const repo = openWorldRepos.find((item) => item.id === target[0]);
@@ -3469,6 +4384,7 @@ function writeTaskCompletionCode(task, owner) {
     agentName: owner.name,
     taskTitle: task.title,
     lines: buildAgentArtifactLines(owner.id, task, fileName),
+    replace: true,
   });
 }
 
@@ -3478,6 +4394,7 @@ function resetAll() {
     return;
   }
   stopAuto();
+  suppressNonEmptyTaskSnapshotUntil = Date.now() + 2500;
   currentTaskIndex = -1;
   selectedAgentId = "master";
   tasks.forEach((task) => {
@@ -3491,6 +4408,62 @@ function resetAll() {
   els.log.innerHTML = "";
   addLog("系统已重置，等待 Master 分发第一条任务。", "System");
   renderAll();
+}
+
+async function clearTaskQueue() {
+  const localCount = tasks.length;
+  const localDeliveryCount = projectDeliveries.length;
+  if (els.clearTasksBtn) {
+    els.clearTasksBtn.disabled = true;
+    els.clearTasksBtn.textContent = "清空中";
+  }
+  stopAuto();
+  suppressNonEmptyTaskSnapshotUntil = Date.now() + 2500;
+  currentTaskIndex = -1;
+  tasks = [];
+  projectDeliveries = [];
+  activeRuntimeDeliveryId = "";
+  localStorage.removeItem("qfActiveRuntimeDeliveryId");
+  Object.keys(deliveryTestStates).forEach((key) => delete deliveryTestStates[key]);
+  backendQueueStats = { ...backendQueueStats, pending: 0, active: 0, blocked: 0, running_total: 0 };
+  agents.forEach((agent) => {
+    agent.status = "idle";
+    agent.x = agent.home[0];
+    agent.y = agent.home[1];
+    agent.currentTaskId = null;
+  });
+  renderAll();
+  addLog(`已清空任务队列 ${localCount} 条，项目交付 ${localDeliveryCount} 个。`, "System");
+
+  if (!backendConnected) {
+    if (els.clearTasksBtn) {
+      els.clearTasksBtn.disabled = false;
+      els.clearTasksBtn.textContent = "清空";
+    }
+    return;
+  }
+  try {
+    const [taskResponse, deliveryResponse] = await Promise.all([
+      fetch("/api/tasks/clear", { method: "POST" }),
+      fetch("/api/project-deliveries/clear", { method: "POST" }),
+    ]);
+    if (!taskResponse.ok) throw new Error(`tasks HTTP ${taskResponse.status}`);
+    if (!deliveryResponse.ok) throw new Error(`deliveries HTTP ${deliveryResponse.status}`);
+    const taskData = await taskResponse.json();
+    const deliveryData = await deliveryResponse.json();
+    if (deliveryData.snapshot) applySnapshot(deliveryData.snapshot);
+    else if (taskData.snapshot) applySnapshot(taskData.snapshot);
+    projectDeliveries = [];
+    renderAll();
+    addLog(`后端已同步清空：任务 ${taskData.cleared ?? localCount} 条，项目 ${deliveryData.cleared ?? localDeliveryCount} 个。`, "System");
+  } catch (error) {
+    addLog(`后端清空失败，已保留本地清空结果：${error.message}`, "System");
+  } finally {
+    if (els.clearTasksBtn) {
+      els.clearTasksBtn.disabled = false;
+      els.clearTasksBtn.textContent = "清空";
+    }
+  }
 }
 
 async function createTask(title, ownerId) {
@@ -3714,11 +4687,25 @@ els.runtimePreviewRefreshBtn?.addEventListener("click", () => {
   if (!url) return;
   els.runtimeProjectFrame.src = url;
 });
+els.runtimeProjectFrame?.addEventListener("load", () => {
+  try {
+    const doc = els.runtimeProjectFrame.contentDocument;
+    const labels = { pending: "等待", active: "进行中", blocked: "阻塞", done: "完成", normal: "普通", high: "高", urgent: "紧急" };
+    doc?.querySelectorAll("button, small").forEach((node) => {
+      Object.entries(labels).forEach(([from, to]) => {
+        node.textContent = String(node.textContent || "").replace(new RegExp(`\\b${from}\\b`, "g"), to);
+      });
+    });
+  } catch {
+    // Cross-origin previews cannot be patched; generated local projects are same-origin.
+  }
+});
 els.taskForm.addEventListener("submit", (event) => {
   event.preventDefault();
   createTask(els.taskInput.value, els.ownerSelect.value);
   els.taskInput.value = "";
 });
+els.clearTasksBtn?.addEventListener("click", clearTaskQueue);
 els.commentForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const text = els.commentInput.value.trim();
@@ -3768,6 +4755,39 @@ els.roomInviteCopyBtn?.addEventListener("click", () => copyInviteCode(els.roomIn
 document.addEventListener("click", (event) => {
   const openRoomButton = event.target.closest?.("[data-open-room]");
   if (openRoomButton) openProjectRoom(openRoomButton.dataset.openRoom);
+  const reviewerChoice = event.target.closest?.("[data-reviewer-task]");
+  if (reviewerChoice) {
+    const input = document.getElementById("reviewerDispatchInput");
+    if (input) {
+      input.value = reviewerChoice.dataset.reviewerTask || "";
+      input.focus();
+    }
+  }
+  const reviewerToggle = event.target.closest?.("[data-reviewer-owner-toggle]");
+  if (reviewerToggle) {
+    const active = reviewerToggle.getAttribute("aria-pressed") === "true";
+    reviewerToggle.setAttribute("aria-pressed", String(!active));
+  }
+  const reviewerDispatchSubmit = event.target.closest?.("[data-reviewer-dispatch-submit]");
+  if (reviewerDispatchSubmit) {
+    dispatchReviewerTask();
+  }
+  const reviewerReviewSubmit = event.target.closest?.("[data-reviewer-review-submit]");
+  if (reviewerReviewSubmit) {
+    approveReviewerPackage();
+  }
+  const workerAccept = event.target.closest?.("[data-worker-accept-task]");
+  if (workerAccept) {
+    acceptWorkerTask(workerAccept.dataset.workerAcceptTask);
+  }
+  const masterDeliver = event.target.closest?.("[data-master-deliver-task]");
+  if (masterDeliver) {
+    deliverMasterTask(masterDeliver.dataset.masterDeliverTask);
+  }
+  const reviewerDispatch = event.target.closest?.("[data-reviewer-dispatch-owner]");
+  if (reviewerDispatch) {
+    dispatchReviewerTask(reviewerDispatch.dataset.reviewerDispatchOwner);
+  }
 });
 els.workspaceTaskForm?.addEventListener("submit", submitWorkspaceTask);
 els.workspaceChatForm?.addEventListener("submit", submitWorkspaceChat);
@@ -5173,11 +6193,20 @@ async function loadCodeArtifacts() {
       .reverse()
       .forEach((artifact) => {
         if (codeArtifactKeys.has(artifact.id)) return;
-        const [repoId, fileName] = String(artifact.target_key || "").split("/");
+        const targetKey = String(artifact.target_key || "");
+        const codeText = String(artifact.code_text || "");
+        if (isLegacyStubArtifact(codeText, targetKey)) {
+          codeArtifactKeys.add(artifact.id);
+          return;
+        }
+        const slashIndex = targetKey.indexOf("/");
+        if (slashIndex <= 0) return;
+        const repoId = targetKey.slice(0, slashIndex);
+        const fileName = targetKey.slice(slashIndex + 1);
         const repo = openWorldRepos.find((item) => item.id === repoId);
         if (!repo || !repo.files[fileName]) return;
         const key = codeKey(repoId, fileName);
-        const artifactLines = String(artifact.code_text || "").split("\n");
+        const artifactLines = codeText.split("\n");
         codeArtifactMeta[key] = artifact;
         codeArtifactKeys.add(artifact.id);
         if (artifact.status === "manual_edit") {
@@ -5186,9 +6215,10 @@ async function loadCodeArtifacts() {
           streamCodeLines({
             repoId,
             fileName,
-            lines: ["", ...artifactLines],
+            lines: artifactLines,
             agentName: agentById(artifact.agent_id)?.name || artifact.agent_id || "Agent",
             taskTitle: artifact.task_id || "后端代码产物",
+            replace: true,
           });
         }
       });

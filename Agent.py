@@ -174,6 +174,15 @@ class QuantumFlowRuntime:
         self.record("task_archived", "master", f"已清理运行队列：{task.title}", task.id)
         return task
 
+    def clear_tasks(self) -> int:
+        cleared = len(self.tasks)
+        self.tasks.clear()
+        for agent in self.agents.values():
+            agent.status = AgentStatus.IDLE
+            agent.current_task_id = None
+        self.record("tasks_cleared", "master", f"已清空任务队列：{cleared} 条")
+        return cleared
+
     def record(self, event_type: str, agent_id: str, message: str, task_id: Optional[str] = None) -> None:
         self.events.append(AgentEvent(event_type, agent_id, message, task_id))
 

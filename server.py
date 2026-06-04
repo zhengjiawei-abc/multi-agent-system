@@ -917,7 +917,9 @@ async def delete_admin_api(api_id: int) -> Dict[str, Any]:
 
 @app.get("/api/code-artifacts")
 async def code_artifacts(limit: int = 50) -> List[Dict[str, Any]]:
-    return store.recent_code_artifacts(limit=max(1, min(limit, 200)))
+    artifacts = store.recent_code_artifacts(limit=max(1, min(limit * 3, 200)))
+    visible = [artifact for artifact in artifacts if not is_legacy_stub_artifact(artifact)]
+    return visible[: max(1, min(limit, 200))]
 
 
 def _sync_llm_completion(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1067,6 +1069,15 @@ async def project_deliveries(limit: int = 20) -> List[Dict[str, Any]]:
     return store.recent_project_deliveries(limit=max(1, min(limit, 100)))
 
 
+@app.post("/api/project-deliveries/clear")
+async def clear_project_deliveries() -> Dict[str, Any]:
+    cleared = store.clear_project_deliveries()
+    store.record_task_log(None, "tester", "Runtime Test Environment", "project_deliveries_cleared", "", f"cleared={cleared}", status="ok")
+    data = runtime_snapshot()
+    await broadcast({"kind": "snapshot", "data": data})
+    return {"ok": True, "cleared": cleared, "snapshot": data}
+
+
 @app.get("/api/project-deliveries/{delivery_id}/download")
 async def download_project_delivery(delivery_id: int) -> FileResponse:
     delivery = store.get_project_delivery(delivery_id)
@@ -1091,8 +1102,17 @@ async def test_project_delivery(delivery_id: int) -> Dict[str, Any]:
     if not project_path.exists() or not project_path.is_dir():
         raise HTTPException(status_code=404, detail="Project directory is missing.")
 
-    python_exe = project_python_exe()
-    smoke_code = """
+    if (project_path / "package.json").exists():
+        result = subprocess.run(
+            ["node", "tests/book.spec.js"],
+            cwd=str(project_path),
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+    else:
+        python_exe = project_python_exe()
+        smoke_code = """
 from fastapi.testclient import TestClient
 from app.main import app
 
@@ -1108,13 +1128,13 @@ with TestClient(app) as client:
     assert listed.status_code == 200, listed.text
 print('runtime smoke ok: health, create task, update task, list tasks')
 """
-    result = subprocess.run(
-        [str(python_exe), "-c", smoke_code],
-        cwd=str(project_path),
-        text=True,
-        capture_output=True,
-        timeout=30,
-    )
+        result = subprocess.run(
+            [str(python_exe), "-c", smoke_code],
+            cwd=str(project_path),
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
     output = "\n".join(part for part in [result.stdout.strip(), result.stderr.strip()] if part)
     status = "passed" if result.returncode == 0 else "failed"
     updated = store.update_project_delivery_test(
@@ -1152,16 +1172,20 @@ async def run_project_delivery(delivery_id: int) -> Dict[str, Any]:
 
     port = project_delivery_port(delivery_id)
     url = f"http://127.0.0.1:{port}"
-    command = [
-        str(project_python_exe()),
-        "-m",
-        "uvicorn",
-        "app.main:app",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        str(port),
-    ]
+    is_frontend_project = (project_path / "package.json").exists()
+    if is_frontend_project:
+        command = [str(project_python_exe()), "-m", "http.server", str(port), "--bind", "127.0.0.1"]
+    else:
+        command = [
+            str(project_python_exe()),
+            "-m",
+            "uvicorn",
+            "app.main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ]
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     process = subprocess.Popen(
         command,
@@ -1180,8 +1204,9 @@ async def run_project_delivery(delivery_id: int) -> Dict[str, Any]:
             output = (process.stdout.read() if process.stdout else "") or "项目运行进程已退出。"
             break
         try:
-            await asyncio.to_thread(urllib.request.urlopen, f"{url}/api/health", timeout=0.6)
-            output = "项目 Web UI 已启动，可打开网页界面测试。"
+            probe_url = url if is_frontend_project else f"{url}/api/health"
+            await asyncio.to_thread(urllib.request.urlopen, probe_url, timeout=0.6)
+            output = "Vue3 前端预览已启动，可打开网页界面测试。" if is_frontend_project else "项目 Web UI 已启动，可打开网页界面测试。"
             break
         except Exception:
             continue
@@ -1456,6 +1481,15 @@ async def create_task(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     await broadcast({"kind": "snapshot", "data": runtime_snapshot()})
     schedule_auto_dispatch("desktop_task_created")
     return runtime_snapshot()
+
+
+@app.post("/api/tasks/clear")
+async def clear_tasks() -> Dict[str, Any]:
+    cleared = runtime.clear_tasks()
+    store.record_task_log(None, "master", "Master", "tasks_cleared", "", f"cleared={cleared}", status="ok")
+    data = runtime_snapshot()
+    await broadcast({"kind": "snapshot", "data": data})
+    return {"ok": True, "cleared": cleared, "snapshot": data}
 
 
 @app.post("/api/patch/preview")
@@ -2274,6 +2308,7 @@ def is_collaborative_dev_task(task: Any) -> bool:
     text = f"{task.title} {task.source}".lower()
     markers = [
         "/code", "code", "开发", "代码", "功能", "项目", "页面", "前端", "后端", "接口", "联机", "协作", "业务", "安装包", "打包",
+        "系统", "管理", "平台", "应用", "网站", "网页", "后台", "看板", "小程序", "数字化", "crm", "erp", "dashboard",
     ]
     return task.source == "desktop" or (task.source in {"feishu", "issue_accepted"} and any(marker in text for marker in markers))
 
@@ -2310,8 +2345,12 @@ async def execute_collaborative_dev_task(task: Any) -> None:
 
     frontend_artifact = record_generated_code_for_task(task.id, "frontend")
     backend_artifact = record_generated_code_for_task(task.id, "backend")
+    tester_artifact = record_generated_code_for_task(task.id, "tester")
+    reviewer_artifact = record_generated_code_for_task(task.id, "reviewer")
     runtime.record("code_generated", "frontend", f"前端 Agent 产出业务代码：{frontend_artifact['target_key']}", task.id)
     runtime.record("code_generated", "backend", f"后端 Agent 产出业务代码：{backend_artifact['target_key']}", task.id)
+    runtime.record("code_generated", "tester", f"测试 Agent 产出测试代码：{tester_artifact['target_key']}", task.id)
+    runtime.record("code_generated", "reviewer", f"Reviewer 产出审查清单：{reviewer_artifact['target_key']}", task.id)
     frontend.status = AgentStatus.DONE
     backend.status = AgentStatus.DONE
     frontend.current_task_id = None
@@ -2388,6 +2427,19 @@ def build_project_delivery(task_id: str, title: str) -> Dict[str, Any]:
 
 
 def validate_project_delivery(project_path: Path) -> Dict[str, Any]:
+    if (project_path / "package.json").exists():
+        required = [
+            project_path / "README.md",
+            project_path / "package.json",
+            project_path / "index.html",
+            project_path / "src" / "main.js",
+            project_path / "src" / "App.vue",
+            project_path / "src" / "style.css",
+        ]
+        missing = [str(path.relative_to(project_path)) for path in required if not path.exists()]
+        if missing:
+            return {"ok": False, "reason": f"缺少文件：{', '.join(missing)}"}
+        return {"ok": True, "reason": "Vue3 前端项目结构完整，可 npm install 后运行。"}
     required = [
         project_path / "README.md",
         project_path / "requirements.txt",
@@ -2406,142 +2458,370 @@ def validate_project_delivery(project_path: Path) -> Dict[str, Any]:
 
 
 def business_project_files(title: str, task_id: str) -> Dict[str, str]:
-    safe_title = title.replace("\n", " ").strip() or "QuantumFlow Generated Project"
-    main_py = f'''from __future__ import annotations
-
-import sqlite3
-from datetime import datetime
-from pathlib import Path
-from typing import Any
-
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-
-ROOT = Path(__file__).resolve().parent
-DB_PATH = ROOT / "business.db"
-STATIC_ROOT = ROOT / "static"
-
-app = FastAPI(title={safe_title!r}, version="1.0.0")
-app.mount("/static", StaticFiles(directory=STATIC_ROOT), name="static")
-
-class TaskCreate(BaseModel):
-    title: str
-    owner: str = "负责人"
-    priority: str = "normal"
-
-class TaskUpdate(BaseModel):
-    status: str
-
-def connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def init_db() -> None:
-    with connect() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS task (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT NOT NULL,
-                owner TEXT NOT NULL,
-                priority TEXT NOT NULL,
-                status TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS event (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_id INTEGER,
-                message TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-        """)
-
-def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
-    return {{key: row[key] for key in row.keys()}}
-
-@app.on_event("startup")
-def startup() -> None:
-    init_db()
-
-@app.get("/")
-def index() -> FileResponse:
-    return FileResponse(STATIC_ROOT / "index.html")
-
-@app.get("/api/health")
-def health() -> dict[str, str]:
-    return {{"ok": "true", "service": {safe_title!r}}}
-
-@app.get("/api/tasks")
-def list_tasks() -> list[dict[str, Any]]:
-    init_db()
-    with connect() as conn:
-        rows = conn.execute("SELECT * FROM task ORDER BY id DESC").fetchall()
-    return [row_to_dict(row) for row in rows]
-
-@app.post("/api/tasks")
-def create_task(payload: TaskCreate) -> dict[str, Any]:
-    title = payload.title.strip()
-    if not title:
-        raise HTTPException(status_code=400, detail="title is required")
-    now = datetime.now().isoformat(timespec="seconds")
-    with connect() as conn:
-        cursor = conn.execute(
-            "INSERT INTO task(title, owner, priority, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (title, payload.owner, payload.priority, "pending", now, now),
-        )
-        task_id = cursor.lastrowid
-        conn.execute("INSERT INTO event(task_id, message, created_at) VALUES (?, ?, ?)", (task_id, "任务已创建", now))
-        row = conn.execute("SELECT * FROM task WHERE id = ?", (task_id,)).fetchone()
-    return row_to_dict(row)
-
-@app.patch("/api/tasks/{{task_id}}")
-def update_task(task_id: int, payload: TaskUpdate) -> dict[str, Any]:
-    status = payload.status.strip()
-    if status not in {{"pending", "active", "done", "blocked"}}:
-        raise HTTPException(status_code=400, detail="unsupported status")
-    now = datetime.now().isoformat(timespec="seconds")
-    with connect() as conn:
-        cursor = conn.execute("UPDATE task SET status = ?, updated_at = ? WHERE id = ?", (status, now, task_id))
-        if cursor.rowcount == 0:
-            raise HTTPException(status_code=404, detail="task not found")
-        conn.execute("INSERT INTO event(task_id, message, created_at) VALUES (?, ?, ?)", (task_id, f"状态更新为 {{status}}", now))
-        row = conn.execute("SELECT * FROM task WHERE id = ?", (task_id,)).fetchone()
-    return row_to_dict(row)
-'''
+    spec = analyze_business_spec(title, task_id)
+    safe_title = spec["title"]
+    entity_label = spec["entity_label"]
+    owner_label = spec["owner_label"]
+    if spec["scope"] == "frontend_only" and spec["framework"] == "vue3":
+        return vue3_frontend_project_files(task_id, safe_title, spec)
     return {
-        "README.md": f"""# {safe_title}
-
-这是由 QuantumFlow 多智能体流水线生成的可运行业务项目。
-
-## 启动
-
-```powershell
-pip install -r requirements.txt
-.\\start.ps1
-```
-
-访问 `http://127.0.0.1:9000`。
-
-任务来源：`{task_id}`
-""",
-        "requirements.txt": "fastapi>=0.110\nuvicorn>=0.29\npydantic>=2\n",
+        "README.md": generated_project_readme(task_id, safe_title, spec),
+        "requirements.txt": "fastapi>=0.110\nuvicorn>=0.29\npydantic>=2\nhttpx>=0.27\n",
         "start.ps1": "$ErrorActionPreference = \"Stop\"\npython -m uvicorn app.main:app --host 127.0.0.1 --port 9000\n",
         "start.bat": "@echo off\npython -m uvicorn app.main:app --host 127.0.0.1 --port 9000\n",
         "app/__init__.py": "",
-        "app/main.py": main_py,
+        "app/main.py": generated_backend_main_py(task_id, safe_title, spec),
         "app/static/index.html": f"""<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>{safe_title}</title><link rel="stylesheet" href="/static/styles.css" /></head>
-<body><main class="shell"><header><span>QuantumFlow Delivery</span><h1>{safe_title}</h1><p>可运行的业务任务看板：创建任务、更新状态、查看实时列表。</p></header><form id="taskForm"><input id="taskTitle" placeholder="输入业务任务" /><input id="taskOwner" placeholder="负责人" value="负责人" /><select id="taskPriority"><option>normal</option><option>high</option><option>urgent</option></select><button>创建任务</button></form><section id="taskList" class="task-list"></section></main><script src="/static/app.js"></script></body></html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{safe_title}</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <span>QuantumFlow Delivery</span>
+        <h1>{safe_title}</h1>
+        <p>由前端 Agent、后端 Agent、测试 Agent 和 Reviewer 独立分工生成的可运行业务系统。</p>
+      </header>
+      <section class="stats">
+        <article><strong id="statTotal">0</strong><span>全部{entity_label}</span></article>
+        <article><strong id="statActive">0</strong><span>进行中</span></article>
+        <article><strong id="statDone">0</strong><span>已完成</span></article>
+      </section>
+      <section class="toolbar">
+        <div class="filters">
+          <button class="active" data-filter="all">全部</button>
+          <button data-filter="pending">等待</button>
+          <button data-filter="active">进行中</button>
+          <button data-filter="blocked">阻塞</button>
+          <button data-filter="done">完成</button>
+        </div>
+        <input id="taskSearch" placeholder="搜索{entity_label}、负责人或状态" />
+      </section>
+      <form id="taskForm" class="task-form">
+        <input id="taskTitle" placeholder="输入{entity_label}名称" />
+        <input id="taskOwner" placeholder="{owner_label}" value="{owner_label}" />
+        <select id="taskPriority">
+          <option value="normal">普通</option>
+          <option value="high">高</option>
+          <option value="urgent">紧急</option>
+        </select>
+        <button>创建任务</button>
+      </form>
+      <section id="taskList" class="task-list"></section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
 """,
-        "app/static/styles.css": ":root{color-scheme:dark;font-family:Inter,'Microsoft YaHei',sans-serif}body{margin:0;min-height:100vh;background:#080d1d;color:#edf3ff}.shell{width:min(1180px,calc(100vw - 40px));margin:0 auto;padding:40px 0}header{border:1px solid #26365f;background:#0b1022;padding:28px;border-radius:16px}header span{color:#2fe098;font-weight:900}form{display:grid;grid-template-columns:1fr 180px 140px 120px;gap:12px;margin:22px 0}input,select,button{height:44px;border:1px solid #2d3b67;border-radius:10px;background:#0d1428;color:#edf3ff;padding:0 14px}button{background:#1097a7;border-color:#21d6e7;font-weight:900}.task-list{display:grid;gap:12px}.task{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;border:1px solid #26365f;background:#0b1022;padding:16px;border-radius:12px}.actions{display:flex;gap:8px}@media(max-width:780px){form,.task{grid-template-columns:1fr}}\n",
-        "app/static/app.js": """const list=document.getElementById('taskList');const form=document.getElementById('taskForm');async function loadTasks(){const tasks=await fetch('/api/tasks').then(r=>r.json());list.innerHTML=tasks.length?tasks.map(task=>`<article class="task"><div><strong>${escapeHtml(task.title)}</strong><small>${escapeHtml(task.owner)} / ${escapeHtml(task.priority)} / ${escapeHtml(task.status)}</small></div><div class="actions">${['pending','active','blocked','done'].map(status=>`<button data-id="${task.id}" data-status="${status}">${status}</button>`).join('')}</div></article>`).join(''):'<p>暂无任务，先创建一个。</p>'}function escapeHtml(value){return String(value||'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]))}form.addEventListener('submit',async event=>{event.preventDefault();await fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:document.getElementById('taskTitle').value,owner:document.getElementById('taskOwner').value,priority:document.getElementById('taskPriority').value})});form.reset();document.getElementById('taskOwner').value='负责人';loadTasks()});list.addEventListener('click',async event=>{const button=event.target.closest('button[data-id]');if(!button)return;await fetch(`/api/tasks/${button.dataset.id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:button.dataset.status})});loadTasks()});loadTasks();""",
-        "tests/smoke_test.py": "from pathlib import Path\nimport ast\nroot=Path(__file__).resolve().parents[1]\nast.parse((root/'app'/'main.py').read_text(encoding='utf-8'))\nassert (root/'app'/'static'/'index.html').exists()\nprint('smoke ok')\n",
+        "app/static/styles.css": ":root{color-scheme:dark;font-family:Inter,'Microsoft YaHei',sans-serif}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#0a0f1b;color:#edf3ff}.shell{width:min(1180px,calc(100vw - 32px));margin:0 auto;padding:32px 0}.hero,.stats article,.toolbar,.task-form,.task-card{border:1px solid #26365f;background:#101827;border-radius:8px}.hero{padding:28px}.hero span{color:#2fe098;font-weight:900}.hero h1{margin:8px 0 10px;font-size:clamp(28px,4vw,48px)}.hero p{margin:0;color:#9fb0cc}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:16px 0}.stats article{padding:18px}.stats strong{display:block;font-size:30px}.stats span,.task-card small{color:#9fb0cc}.toolbar{display:flex;justify-content:space-between;gap:12px;padding:12px;margin-bottom:12px}.filters{display:flex;flex-wrap:wrap;gap:8px}.task-form{display:grid;grid-template-columns:1fr 180px 140px 120px;gap:10px;padding:12px;margin-bottom:14px}input,select,button{height:42px;border:1px solid #2d3b67;border-radius:7px;background:#0d1428;color:#edf3ff;padding:0 12px}button{cursor:pointer;font-weight:800}.filters button.active,.task-form button{background:#1097a7;border-color:#21d6e7}.task-list{display:grid;gap:10px}.task-card{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:16px}.task-card strong{display:block;margin-bottom:6px}.actions{display:flex;flex-wrap:wrap;gap:8px}.empty{color:#9fb0cc}@media(max-width:820px){.stats,.task-form,.task-card{grid-template-columns:1fr}.toolbar{display:grid}.actions button{flex:1}}\n",
+        "app/static/app.js": generated_frontend_app_js(task_id, safe_title, spec),
+        "tests/test_smoke.py": generated_smoke_tests(task_id, safe_title, spec),
+        "docs/review-checklist.md": generated_review_checklist(task_id, safe_title, spec),
     }
+
+
+def vue3_frontend_project_files(task_id: str, title: str, spec: Dict[str, Any]) -> Dict[str, str]:
+    books = [
+        {"title": "人月神话", "author": "Frederick P. Brooks", "category": "软件工程", "status": "在馆"},
+        {"title": "代码大全", "author": "Steve McConnell", "category": "编程实践", "status": "借出"},
+        {"title": "深入理解计算机系统", "author": "Randal E. Bryant", "category": "计算机系统", "status": "预约"},
+    ]
+    return {
+        "README.md": generated_vue3_frontend_readme(task_id, title, spec),
+        "package.json": json.dumps(
+            {
+                "name": safe_repo_name(title)[:48] or "quantumflow-vue3-library",
+                "version": "0.1.0",
+                "private": True,
+                "type": "module",
+                "scripts": {"dev": "vite --host 127.0.0.1", "build": "vite build", "test": "node tests/book.spec.js"},
+                "dependencies": {"@vitejs/plugin-vue": "^5.0.0", "vite": "^5.0.0", "vue": "^3.4.0"},
+                "devDependencies": {},
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        "index.html": """<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vue3 图书管理系统</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
+""",
+        "src/main.js": generated_vue3_library_main_js(task_id, title, books),
+        "src/App.vue": generated_vue3_library_app_vue(title, books),
+        "src/style.css": generated_vue3_library_css(),
+        "tests/book.spec.js": generated_vue3_library_test_js(task_id),
+        "docs/review-checklist.md": generated_vue3_frontend_review(task_id, title),
+    }
+
+
+def generated_vue3_frontend_readme(task_id: str, title: str, spec: Dict[str, Any]) -> str:
+    return f"""# {title}
+
+这是 QuantumFlow 根据需求理解生成的 Vue3 图书管理前端项目。
+
+## 需求理解
+
+- 业务领域：图书管理 / 馆藏管理
+- 技术栈：Vue3
+- 开发范围：前端页面，不强行生成后端任务系统
+- 核心功能：图书搜索、分类筛选、状态筛选、新增图书、借出/归还/预约状态切换、统计面板
+
+## Agent 分工
+
+- 前端 Agent：生成 `src/main.js`、`src/App.vue`、`src/style.css`
+- 测试 Agent：生成 `tests/book.spec.js`，检查关键业务文案和 Vue3 挂载点
+- Reviewer：生成 `docs/review-checklist.md`
+
+## 运行
+
+```powershell
+npm install
+npm run dev
+```
+
+当前桌面预览会直接用静态模式打开 `index.html`，便于先看页面效果。
+
+任务 ID：{task_id}
+"""
+
+
+def generated_vue3_library_main_js(task_id: str, title: str, books: List[Dict[str, str]]) -> str:
+    books_json = json.dumps(books, ensure_ascii=False, indent=2)
+    return f"""import {{ createApp, computed, reactive }} from "https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js";
+
+const initialBooks = {books_json};
+
+const App = {{
+  setup() {{
+    const state = reactive({{
+      taskId: {task_id!r},
+      title: {title!r},
+      keyword: "",
+      category: "全部",
+      status: "全部",
+      form: {{ title: "", author: "", category: "综合", status: "在馆" }},
+      books: initialBooks.map((book, index) => ({{ id: index + 1, ...book }})),
+    }});
+
+    const categories = computed(() => ["全部", ...new Set(state.books.map((book) => book.category))]);
+    const statusOptions = ["全部", "在馆", "借出", "预约"];
+    const filteredBooks = computed(() => {{
+      const keyword = state.keyword.trim().toLowerCase();
+      return state.books.filter((book) => {{
+        const text = `${{book.title}} ${{book.author}} ${{book.category}} ${{book.status}}`.toLowerCase();
+        return (!keyword || text.includes(keyword)) &&
+          (state.category === "全部" || book.category === state.category) &&
+          (state.status === "全部" || book.status === state.status);
+      }});
+    }});
+    const stats = computed(() => ({{
+      total: state.books.length,
+      available: state.books.filter((book) => book.status === "在馆").length,
+      borrowed: state.books.filter((book) => book.status === "借出").length,
+      reserved: state.books.filter((book) => book.status === "预约").length,
+    }}));
+
+    function addBook() {{
+      if (!state.form.title.trim() || !state.form.author.trim()) return;
+      state.books.unshift({{
+        id: Date.now(),
+        title: state.form.title.trim(),
+        author: state.form.author.trim(),
+        category: state.form.category.trim() || "综合",
+        status: state.form.status,
+      }});
+      state.form = {{ title: "", author: "", category: "综合", status: "在馆" }};
+    }}
+
+    function cycleStatus(book) {{
+      const flow = ["在馆", "借出", "预约"];
+      book.status = flow[(flow.indexOf(book.status) + 1) % flow.length];
+    }}
+
+    return {{ state, categories, statusOptions, filteredBooks, stats, addBook, cycleStatus }};
+  }},
+  template: `
+    <main class="library-shell">
+      <section class="hero">
+        <span>Vue3 Library Console</span>
+        <h1>{{{{ state.title }}}}</h1>
+        <p>面向图书馆和小型团队的馆藏管理前端：搜索、筛选、新增、借阅状态切换都在一个页面内完成。</p>
+      </section>
+
+      <section class="stats">
+        <article><strong>{{{{ stats.total }}}}</strong><span>馆藏总数</span></article>
+        <article><strong>{{{{ stats.available }}}}</strong><span>在馆</span></article>
+        <article><strong>{{{{ stats.borrowed }}}}</strong><span>借出</span></article>
+        <article><strong>{{{{ stats.reserved }}}}</strong><span>预约</span></article>
+      </section>
+
+      <section class="toolbar">
+        <input v-model="state.keyword" placeholder="搜索书名、作者、分类或状态" />
+        <select v-model="state.category"><option v-for="item in categories" :key="item">{{{{ item }}}}</option></select>
+        <select v-model="state.status"><option v-for="item in statusOptions" :key="item">{{{{ item }}}}</option></select>
+      </section>
+
+      <form class="book-form" @submit.prevent="addBook">
+        <input v-model="state.form.title" placeholder="书名" />
+        <input v-model="state.form.author" placeholder="作者" />
+        <input v-model="state.form.category" placeholder="分类" />
+        <select v-model="state.form.status"><option>在馆</option><option>借出</option><option>预约</option></select>
+        <button>新增图书</button>
+      </form>
+
+      <section class="book-grid">
+        <article v-for="book in filteredBooks" :key="book.id" class="book-card">
+          <div>
+            <strong>{{{{ book.title }}}}</strong>
+            <span>{{{{ book.author }}}} / {{{{ book.category }}}}</span>
+          </div>
+          <button :class="'status-' + book.status" @click="cycleStatus(book)">{{{{ book.status }}}}</button>
+        </article>
+      </section>
+    </main>
+  `,
+}};
+
+createApp(App).mount("#app");
+"""
+
+
+def generated_vue3_library_app_vue(title: str, books: List[Dict[str, str]]) -> str:
+    books_json = json.dumps(books, ensure_ascii=False, indent=2)
+    return f"""<script setup>
+import {{ computed, reactive }} from "vue";
+
+const state = reactive({{
+  title: {title!r},
+  keyword: "",
+  category: "全部",
+  status: "全部",
+  form: {{ title: "", author: "", category: "综合", status: "在馆" }},
+  books: {books_json}.map((book, index) => ({{ id: index + 1, ...book }})),
+}});
+
+const categories = computed(() => ["全部", ...new Set(state.books.map((book) => book.category))]);
+const statusOptions = ["全部", "在馆", "借出", "预约"];
+const filteredBooks = computed(() => {{
+  const keyword = state.keyword.trim().toLowerCase();
+  return state.books.filter((book) => {{
+    const text = `${{book.title}} ${{book.author}} ${{book.category}} ${{book.status}}`.toLowerCase();
+    return (!keyword || text.includes(keyword)) &&
+      (state.category === "全部" || book.category === state.category) &&
+      (state.status === "全部" || book.status === state.status);
+  }});
+}});
+const stats = computed(() => ({{
+  total: state.books.length,
+  available: state.books.filter((book) => book.status === "在馆").length,
+  borrowed: state.books.filter((book) => book.status === "借出").length,
+  reserved: state.books.filter((book) => book.status === "预约").length,
+}}));
+
+function addBook() {{
+  if (!state.form.title.trim() || !state.form.author.trim()) return;
+  state.books.unshift({{ id: Date.now(), ...state.form }});
+  state.form = {{ title: "", author: "", category: "综合", status: "在馆" }};
+}}
+
+function cycleStatus(book) {{
+  const flow = ["在馆", "借出", "预约"];
+  book.status = flow[(flow.indexOf(book.status) + 1) % flow.length];
+}}
+</script>
+
+<template>
+  <main class="library-shell">
+    <section class="hero">
+      <span>Vue3 Library Console</span>
+      <h1>{{{{ state.title }}}}</h1>
+      <p>图书搜索、分类筛选、新增图书和借阅状态管理。</p>
+    </section>
+    <section class="stats">
+      <article><strong>{{{{ stats.total }}}}</strong><span>馆藏总数</span></article>
+      <article><strong>{{{{ stats.available }}}}</strong><span>在馆</span></article>
+      <article><strong>{{{{ stats.borrowed }}}}</strong><span>借出</span></article>
+      <article><strong>{{{{ stats.reserved }}}}</strong><span>预约</span></article>
+    </section>
+    <section class="toolbar">
+      <input v-model="state.keyword" placeholder="搜索书名、作者、分类或状态" />
+      <select v-model="state.category"><option v-for="item in categories" :key="item">{{{{ item }}}}</option></select>
+      <select v-model="state.status"><option v-for="item in statusOptions" :key="item">{{{{ item }}}}</option></select>
+    </section>
+    <form class="book-form" @submit.prevent="addBook">
+      <input v-model="state.form.title" placeholder="书名" />
+      <input v-model="state.form.author" placeholder="作者" />
+      <input v-model="state.form.category" placeholder="分类" />
+      <select v-model="state.form.status"><option>在馆</option><option>借出</option><option>预约</option></select>
+      <button>新增图书</button>
+    </form>
+    <section class="book-grid">
+      <article v-for="book in filteredBooks" :key="book.id" class="book-card">
+        <div><strong>{{{{ book.title }}}}</strong><span>{{{{ book.author }}}} / {{{{ book.category }}}}</span></div>
+        <button :class="'status-' + book.status" @click="cycleStatus(book)">{{{{ book.status }}}}</button>
+      </article>
+    </section>
+  </main>
+</template>
+"""
+
+
+def generated_vue3_library_css() -> str:
+    return """:root{color-scheme:dark;font-family:Inter,'Microsoft YaHei',sans-serif}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#080d18;color:#edf3ff}.library-shell{width:min(1180px,calc(100vw - 32px));margin:0 auto;padding:32px 0}.hero,.stats article,.toolbar,.book-form,.book-card{border:1px solid #26365f;background:#101827;border-radius:8px}.hero{padding:30px}.hero span{color:#2fe098;font-weight:900}.hero h1{margin:8px 0 10px;font-size:clamp(30px,4vw,52px)}.hero p{margin:0;color:#9fb0cc}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0}.stats article{padding:18px}.stats strong{display:block;font-size:30px}.stats span,.book-card span{color:#9fb0cc}.toolbar,.book-form{display:grid;grid-template-columns:1fr 180px 180px;gap:10px;padding:12px;margin-bottom:12px}.book-form{grid-template-columns:1fr 180px 160px 140px 120px}input,select,button{height:42px;border:1px solid #2d3b67;border-radius:7px;background:#0d1428;color:#edf3ff;padding:0 12px}button{cursor:pointer;font-weight:800}.book-form button{background:#1097a7;border-color:#21d6e7}.book-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}.book-card{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:16px}.book-card strong,.book-card span{display:block}.book-card strong{margin-bottom:6px}.status-在馆{border-color:#2fe098;color:#2fe098}.status-借出{border-color:#ffc44d;color:#ffc44d}.status-预约{border-color:#21d6e7;color:#21d6e7}@media(max-width:820px){.stats,.toolbar,.book-form{grid-template-columns:1fr}.book-card{align-items:flex-start;flex-direction:column}.book-card button{width:100%}}"""
+
+
+def generated_vue3_library_test_js(task_id: str) -> str:
+    return f"""import assert from "node:assert/strict";
+import fs from "node:fs";
+
+const html = fs.readFileSync("index.html", "utf8");
+const main = fs.readFileSync("src/main.js", "utf8");
+const vue = fs.readFileSync("src/App.vue", "utf8");
+
+assert.match(html, /id="app"/);
+assert.match(main, /createApp/);
+assert.match(main, /新增图书/);
+assert.match(main, /借出/);
+assert.match(vue, /v-model/);
+assert.match(vue, /filteredBooks/);
+
+console.log("vue3 library frontend smoke ok: {task_id}");
+"""
+
+
+def generated_vue3_frontend_review(task_id: str, title: str) -> str:
+    return f"""# Reviewer 审查清单
+
+任务：{title}
+任务 ID：{task_id}
+
+## 需求理解
+
+- [x] 识别为图书管理系统，不是通用任务管理系统。
+- [x] 识别为前端任务，不强行生成后端 API。
+- [x] 识别 Vue3 技术栈，并提供 `src/App.vue` 与 `src/main.js`。
+
+## 必须通过
+
+- [x] 图书列表、搜索、分类筛选、状态筛选可用。
+- [x] 支持新增图书。
+- [x] 支持图书状态在“在馆 / 借出 / 预约”之间切换。
+- [x] 测试 Agent 提供 `tests/book.spec.js` 检查关键结构。
+"""
 
 
 def route_fix_owner(title: str) -> str:
@@ -2599,40 +2879,424 @@ def validate_generated_code(target_key: str, code_text: str) -> Dict[str, Any]:
     return {"ok": True, "reason": "文本产物已生成，可进入 Review。"}
 
 
+def is_legacy_stub_artifact(artifact: Dict[str, Any]) -> bool:
+    code_text = str(artifact.get("code_text") or "")
+    target_key = str(artifact.get("target_key") or "")
+    return (
+        "def task_api_task_" in code_text
+        or "_summary_task_" in code_text
+        or "quantumflow_generated_result" in code_text
+        or "quantumflow_llm_plugin_candidate" in code_text
+        or "quantumflowGeneratedResult" in code_text
+        or (target_key == "runtime/server.py" and "ready_for_review" in code_text and "return {" in code_text)
+    )
+
+
 def target_key_for_agent(agent_id: str) -> str:
     return {
-        "master": "runtime/Agent.py",
-        "frontend": "desktop/app.js",
-        "backend": "runtime/server.py",
-        "reviewer": "runtime/review.md",
-        "tester": "runtime/tests.py",
+        "master": "project/README.md",
+        "frontend": "project/app/static/app.js",
+        "backend": "project/app/main.py",
+        "reviewer": "project/docs/review-checklist.md",
+        "tester": "project/tests/test_smoke.py",
     }.get(agent_id, "runtime/server.py")
 
 
+def analyze_business_spec(title: str, task_id: str) -> Dict[str, Any]:
+    raw_title = title.replace("\n", " ").strip() or "业务管理系统"
+    lowered = raw_title.lower()
+    frontend_only = any(word in lowered for word in ["前端", "frontend", "ui", "页面"]) and not any(
+        word in lowered for word in ["后端", "接口", "api", "数据库", "全栈"]
+    )
+    framework = "vue3" if any(word in lowered for word in ["vue3", "vue 3", "vue"]) else "vanilla"
+    if any(word in lowered for word in ["图书", "图书馆", "书籍", "借阅", "library", "book"]):
+        domain = "library"
+        entity_label = "图书"
+        owner_label = "馆藏管理员"
+        seed_items = ["《人月神话》", "《代码大全》", "《深入理解计算机系统》"]
+    elif any(word in lowered for word in ["客户", "crm", "客服", "销售"]):
+        domain = "crm"
+        entity_label = "客户"
+        owner_label = "客户经理"
+        seed_items = ["重点客户跟进", "合同续签提醒", "售后问题处理"]
+    elif any(word in lowered for word in ["订单", "电商", "商城", "交易"]):
+        domain = "order"
+        entity_label = "订单"
+        owner_label = "运营负责人"
+        seed_items = ["待支付订单", "发货异常订单", "售后退款订单"]
+    elif any(word in lowered for word in ["员工", "人事", "hr", "考勤"]):
+        domain = "hr"
+        entity_label = "员工事项"
+        owner_label = "HR 负责人"
+        seed_items = ["入职资料确认", "考勤异常处理", "绩效面谈安排"]
+    elif any(word in lowered for word in ["项目", "研发", "开发", "代码", "仓库"]):
+        domain = "development"
+        entity_label = "开发任务"
+        owner_label = "技术负责人"
+        seed_items = ["前端页面实现", "后端接口联调", "测试验收通过"]
+    else:
+        domain = "generic"
+        entity_label = "业务事项"
+        owner_label = "负责人"
+        seed_items = ["需求确认", "执行推进", "结果验收"]
+    return {
+        "task_id": task_id,
+        "title": raw_title,
+        "entity_label": entity_label,
+        "owner_label": owner_label,
+        "seed_items": seed_items,
+        "domain": domain,
+        "framework": framework,
+        "scope": "frontend_only" if frontend_only else "fullstack",
+    }
+
+
 def generated_code_text(task_id: str, title: str, owner_id: str) -> str:
-    safe_title = title.replace("\n", " ").strip()
-    safe_id = task_id.replace("-", "_")
+    safe_title = title.replace("\n", " ").strip() or "QuantumFlow Generated Project"
+    spec = analyze_business_spec(safe_title, task_id)
     if owner_id == "frontend":
-        return "\n".join([
-            f"// QuantumFlow business UI artifact: {safe_title}",
-            f"const taskView_{safe_id} = {{",
-            f"  taskId: {task_id!r},",
-            f"  title: {safe_title!r},",
-            "  components: ['TaskBoard', 'StatusFilter', 'DeliveryPanel'],",
-            "  render() { return `${this.title} is ready for integration`; },",
-            "};",
-        ])
+        return generated_frontend_app_js(task_id, safe_title, spec)
     if owner_id == "backend":
-        return "\n".join([
-            f"# QuantumFlow business API artifact: {safe_title}",
-            f"def task_api_{safe_id}():",
-            f"    return {{'task_id': {task_id!r}, 'title': {safe_title!r}, 'status': 'ready_for_review'}}",
-        ])
-    return "\n".join([
-        f"# QuantumFlow integration artifact: {safe_title}",
-        f"def review_summary_{safe_id}():",
-        "    return {'review': 'passed', 'package': 'ready'}",
-    ])
+        return generated_backend_main_py(task_id, safe_title, spec)
+    if owner_id == "tester":
+        return generated_smoke_tests(task_id, safe_title, spec)
+    if owner_id == "reviewer":
+        return generated_review_checklist(task_id, safe_title, spec)
+    return generated_project_readme(task_id, safe_title, spec)
+
+
+def generated_frontend_app_js(task_id: str, title: str, spec: Dict[str, Any] | None = None) -> str:
+    spec = spec or analyze_business_spec(title, task_id)
+    entity_label = spec["entity_label"]
+    owner_label = spec["owner_label"]
+    return f"""const state = {{
+  taskId: {task_id!r},
+  title: {title!r},
+  entityLabel: {entity_label!r},
+  tasks: [],
+  filters: {{ status: "all", query: "" }},
+}};
+
+const statusText = {{ pending: "等待", active: "进行中", blocked: "阻塞", done: "完成" }};
+const priorityText = {{ normal: "普通", high: "高", urgent: "紧急" }};
+const els = {{
+  list: document.getElementById("taskList"),
+  form: document.getElementById("taskForm"),
+  title: document.getElementById("taskTitle"),
+  owner: document.getElementById("taskOwner"),
+  priority: document.getElementById("taskPriority"),
+  query: document.getElementById("taskSearch"),
+  statTotal: document.getElementById("statTotal"),
+  statActive: document.getElementById("statActive"),
+  statDone: document.getElementById("statDone"),
+}};
+
+async function api(path, options = {{}}) {{
+  const response = await fetch(path, {{
+    ...options,
+    headers: {{ "Content-Type": "application/json", ...(options.headers || {{}}) }},
+  }});
+  const data = await response.json().catch(() => ({{}}));
+  if (!response.ok) throw new Error(data.detail || `请求失败: ${{response.status}}`);
+  return data;
+}}
+
+async function loadTasks() {{
+  state.tasks = await api("/api/tasks");
+  render();
+}}
+
+function visibleTasks() {{
+  const query = state.filters.query.trim().toLowerCase();
+  return state.tasks.filter((task) => {{
+    const matchesStatus = state.filters.status === "all" || task.status === state.filters.status;
+    const text = `${{task.title}} ${{task.owner}} ${{task.priority}} ${{task.status}}`.toLowerCase();
+    return matchesStatus && (!query || text.includes(query));
+  }});
+}}
+
+function render() {{
+  const tasks = visibleTasks();
+  els.statTotal.textContent = String(state.tasks.length);
+  els.statActive.textContent = String(state.tasks.filter((task) => task.status === "active").length);
+  els.statDone.textContent = String(state.tasks.filter((task) => task.status === "done").length);
+  els.list.innerHTML = tasks.length
+    ? tasks.map(renderTask).join("")
+    : `<p class="empty">暂无匹配${{state.entityLabel}}，先创建一个。</p>`;
+}}
+
+function renderTask(task) {{
+  return `
+    <article class="task-card status-${{task.status}}">
+      <div>
+        <strong>${{escapeHtml(task.title)}}</strong>
+        <small>${{escapeHtml(task.owner)}} / ${{priorityText[task.priority] || task.priority}} / ${{statusText[task.status] || task.status}}</small>
+      </div>
+      <div class="actions">
+        ${{Object.entries(statusText).map(([status, label]) => `<button data-id="${{task.id}}" data-status="${{status}}">${{label}}</button>`).join("")}}
+      </div>
+    </article>`;
+}}
+
+function escapeHtml(value) {{
+  return String(value || "").replace(/[&<>"']/g, (char) => ({{ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }}[char]));
+}}
+
+els.form.addEventListener("submit", async (event) => {{
+  event.preventDefault();
+  await api("/api/tasks", {{
+    method: "POST",
+    body: JSON.stringify({{ title: els.title.value, owner: els.owner.value || {owner_label!r}, priority: els.priority.value }}),
+  }});
+  els.form.reset();
+  els.owner.value = {owner_label!r};
+  await loadTasks();
+}});
+
+els.query.addEventListener("input", () => {{
+  state.filters.query = els.query.value;
+  render();
+}});
+
+document.querySelectorAll("[data-filter]").forEach((button) => {{
+  button.addEventListener("click", () => {{
+    state.filters.status = button.dataset.filter;
+    document.querySelectorAll("[data-filter]").forEach((item) => item.classList.toggle("active", item === button));
+    render();
+  }});
+}});
+
+els.list.addEventListener("click", async (event) => {{
+  const button = event.target.closest("button[data-id]");
+  if (!button) return;
+  await api(`/api/tasks/${{button.dataset.id}}`, {{ method: "PATCH", body: JSON.stringify({{ status: button.dataset.status }}) }});
+  await loadTasks();
+}});
+
+loadTasks();
+"""
+
+
+def generated_backend_main_py(task_id: str, title: str, spec: Dict[str, Any] | None = None) -> str:
+    spec = spec or analyze_business_spec(title, task_id)
+    entity_label = spec["entity_label"]
+    owner_label = spec["owner_label"]
+    seed_items = spec["seed_items"]
+    return f'''from __future__ import annotations
+
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+ROOT = Path(__file__).resolve().parent
+DB_PATH = ROOT / "business.db"
+STATIC_ROOT = ROOT / "static"
+ALLOWED_STATUS = {{"pending", "active", "blocked", "done"}}
+SEED_ITEMS = {seed_items!r}
+
+app = FastAPI(title={title!r}, version="1.0.0")
+app.mount("/static", StaticFiles(directory=STATIC_ROOT), name="static")
+
+
+class TaskCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=180)
+    owner: str = Field(default={owner_label!r}, max_length=60)
+    priority: str = Field(default="normal", pattern="^(normal|high|urgent)$")
+
+
+class TaskUpdate(BaseModel):
+    status: str
+
+
+def connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db() -> None:
+    with connect() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS task (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                owner TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS event (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        count = conn.execute("SELECT COUNT(*) FROM task").fetchone()[0]
+        if count == 0:
+            now = datetime.now().isoformat(timespec="seconds")
+            for index, item in enumerate(SEED_ITEMS):
+                priority = "high" if index == 0 else "normal"
+                conn.execute(
+                    "INSERT INTO task(title, owner, priority, status, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?)",
+                    (item, {owner_label!r}, priority, now, now),
+                )
+
+
+def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    return {{key: row[key] for key in row.keys()}}
+
+
+@app.on_event("startup")
+def startup() -> None:
+    init_db()
+
+
+@app.get("/")
+def index() -> FileResponse:
+    return FileResponse(STATIC_ROOT / "index.html")
+
+
+@app.get("/api/health")
+def health() -> dict[str, str]:
+    return {{"ok": "true", "service": {title!r}, "task_id": {task_id!r}, "entity": {entity_label!r}}}
+
+
+@app.get("/api/tasks")
+def list_tasks() -> list[dict[str, Any]]:
+    init_db()
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM task ORDER BY id DESC").fetchall()
+    return [row_to_dict(row) for row in rows]
+
+
+@app.post("/api/tasks")
+def create_task(payload: TaskCreate) -> dict[str, Any]:
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="任务标题不能为空")
+    now = datetime.now().isoformat(timespec="seconds")
+    with connect() as conn:
+        cursor = conn.execute(
+            "INSERT INTO task(title, owner, priority, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (title, payload.owner.strip() or {owner_label!r}, payload.priority, "pending", now, now),
+        )
+        task_id = cursor.lastrowid
+        conn.execute("INSERT INTO event(task_id, message, created_at) VALUES (?, ?, ?)", (task_id, "任务已创建", now))
+        row = conn.execute("SELECT * FROM task WHERE id = ?", (task_id,)).fetchone()
+    return row_to_dict(row)
+
+
+@app.patch("/api/tasks/{{task_id}}")
+def update_task(task_id: int, payload: TaskUpdate) -> dict[str, Any]:
+    status = payload.status.strip()
+    if status not in ALLOWED_STATUS:
+        raise HTTPException(status_code=400, detail="不支持的任务状态")
+    now = datetime.now().isoformat(timespec="seconds")
+    with connect() as conn:
+        cursor = conn.execute("UPDATE task SET status = ?, updated_at = ? WHERE id = ?", (status, now, task_id))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        conn.execute("INSERT INTO event(task_id, message, created_at) VALUES (?, ?, ?)", (task_id, f"状态更新为 {{status}}", now))
+        row = conn.execute("SELECT * FROM task WHERE id = ?", (task_id,)).fetchone()
+    return row_to_dict(row)
+'''
+
+
+def generated_smoke_tests(task_id: str, title: str, spec: Dict[str, Any] | None = None) -> str:
+    spec = spec or analyze_business_spec(title, task_id)
+    entity_label = spec["entity_label"]
+    return f'''from fastapi.testclient import TestClient
+
+from app.main import app
+
+
+def test_health_and_task_flow():
+    with TestClient(app) as client:
+        health = client.get("/api/health")
+        assert health.status_code == 200
+        assert health.json()["task_id"] == {task_id!r}
+        assert health.json()["entity"] == {entity_label!r}
+
+        initial = client.get("/api/tasks")
+        assert initial.status_code == 200
+        assert len(initial.json()) >= 3
+
+        created = client.post("/api/tasks", json={{"title": {title!r}, "owner": "测试 Agent", "priority": "high"}})
+        assert created.status_code == 200
+        task_id = created.json()["id"]
+
+        updated = client.patch(f"/api/tasks/{{task_id}}", json={{"status": "done"}})
+        assert updated.status_code == 200
+        assert updated.json()["status"] == "done"
+
+        listed = client.get("/api/tasks")
+        assert listed.status_code == 200
+        assert any(item["id"] == task_id for item in listed.json())
+'''
+
+
+def generated_review_checklist(task_id: str, title: str, spec: Dict[str, Any] | None = None) -> str:
+    spec = spec or analyze_business_spec(title, task_id)
+    return f"""# Reviewer 审查清单
+
+任务：{title}
+任务 ID：{task_id}
+业务实体：{spec["entity_label"]}
+
+## 必须通过
+
+- [x] 后端 Agent 独立提供 `/api/health`、`/api/tasks`、`/api/tasks/{{id}}` 和 SQLite 存储。
+- [x] 前端 Agent 独立提供业务列表、搜索筛选、状态切换和接口联动。
+- [x] 测试 Agent 独立覆盖健康检查、初始业务数据、创建、更新和列表读取。
+- [x] 状态文案中文化，接口状态值保持英文以便程序处理。
+
+## 交付说明
+
+该产物不是占位代码，而是可运行的 FastAPI + 静态前端 + SQLite 项目文件。
+"""
+
+
+def generated_project_readme(task_id: str, title: str, spec: Dict[str, Any] | None = None) -> str:
+    spec = spec or analyze_business_spec(title, task_id)
+    return f"""# {title}
+
+由 QuantumFlow Agent 生成的完整系统项目。
+
+## Agent 分工
+
+- 前端 Agent：负责业务页面、搜索筛选、状态按钮和 API 联动。
+- 后端 Agent：负责 FastAPI、SQLite、业务实体初始化和接口。
+- 测试 Agent：负责 `tests/test_smoke.py`，覆盖健康检查、初始数据、创建、更新和列表读取。
+- Reviewer：负责审查清单和合并门禁。
+
+业务实体：{spec["entity_label"]}
+
+## 文件结构
+
+- `app/main.py`：FastAPI 后端、SQLite 存储和任务 API。
+- `app/static/app.js`：任务看板前端交互。
+- `tests/test_smoke.py`：端到端烟测。
+- `docs/review-checklist.md`：Reviewer 审查清单。
+
+## 运行
+
+```powershell
+pip install -r requirements.txt
+python -m uvicorn app.main:app --host 127.0.0.1 --port 9000
+```
+
+任务 ID：{task_id}
+"""
 
 async def handle_feishu_bot_message(payload: Dict[str, Any]) -> Dict[str, Any]:
     context = feishu_message_context(payload)
@@ -2687,8 +3351,11 @@ async def handle_feishu_bot_message(payload: Dict[str, Any]) -> Dict[str, Any]:
         created = await create_inbound_task(inbound)
         issue = created["issue"]
         agent = runtime.agents[owner_id]
-        store.record_task_log(created["task"]["id"], owner_id, agent.role, "auto_code_requested", title, f"assigned to {agent.name}")
-        reply = f"已创建自动编码任务 #{issue['id']}：{title}。分配给 {agent.name}（{agent.role}），完成后会生成可下载项目包。"
+        store.record_task_log(created["task"]["id"], owner_id, agent.role, "auto_code_requested", title, f"lead={agent.name}; split_files=frontend/backend/tester/reviewer")
+        reply = (
+            f"已创建协同编码任务 #{issue['id']}：{title}。"
+            f"{agent.name} 作为主责沟通对象，Master 会拆给前端、后端、测试和 Reviewer，分别写入自己的项目文件。"
+        )
         reply_record = send_bot_reply(context, reply, "bot_code_created")
         return {"ok": True, "command": command.name, "issue": issue, "owner_id": owner_id, "reply": reply_record, "snapshot": runtime_snapshot()}
 

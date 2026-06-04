@@ -1013,6 +1013,222 @@ body.admin-mode .agent-strip {
   font-weight: 800;
 }
 
+.agent-quick-panel.reviewer-dispatch-mode {
+  width: 600px;
+  height: 390px;
+  border-color: rgba(255, 81, 95, 0.72);
+  box-shadow: 0 22px 58px rgba(255, 81, 95, 0.16), 0 22px 58px rgba(0, 0, 0, 0.48);
+}
+
+.agent-quick-panel.reviewer-dispatch-mode .agent-quick-body {
+  grid-template-columns: 1.05fr 1fr;
+}
+
+.reviewer-dispatch-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 12px;
+}
+
+.reviewer-dispatch-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #8f9bb8;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.reviewer-dispatch-head strong {
+  color: #ff9aa4;
+}
+
+.reviewer-task-choice {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  min-height: 58px;
+  padding: 10px;
+  border: 1px solid rgba(78, 95, 145, 0.58);
+  border-radius: 8px;
+  background: #11182d;
+  color: #edf3ff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.reviewer-task-choice:hover {
+  border-color: rgba(255, 81, 95, 0.72);
+}
+
+.reviewer-task-choice strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reviewer-task-choice span,
+.reviewer-task-empty {
+  color: #8f9bb8;
+  font-size: 12px;
+}
+
+.reviewer-task-empty {
+  padding: 14px;
+  border: 1px dashed rgba(143, 155, 184, 0.35);
+  border-radius: 8px;
+}
+
+.reviewer-dispatch-form {
+  display: grid;
+  gap: 10px;
+}
+
+.reviewer-dispatch-form textarea {
+  min-height: 92px;
+  resize: none;
+  border: 1px solid rgba(78, 95, 145, 0.65);
+  border-radius: 8px;
+  background: #0b1020;
+  color: #edf3ff;
+  padding: 10px;
+  line-height: 1.5;
+}
+
+.reviewer-dispatch-targets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.reviewer-dispatch-targets button {
+  display: grid;
+  gap: 4px;
+  min-height: 72px;
+  padding: 10px;
+  border: 1px solid rgba(33, 214, 231, 0.45);
+  border-radius: 8px;
+  background: rgba(33, 214, 231, 0.1);
+  color: #dff8ff;
+  cursor: pointer;
+}
+
+.reviewer-dispatch-targets button:hover {
+  border-color: rgba(47, 224, 152, 0.7);
+  background: rgba(47, 224, 152, 0.13);
+}
+
+.reviewer-dispatch-targets button[aria-pressed="true"] {
+  border-color: rgba(47, 224, 152, 0.9);
+  background: linear-gradient(180deg, rgba(47, 224, 152, 0.24), rgba(33, 214, 231, 0.12));
+  box-shadow: inset 0 0 0 1px rgba(47, 224, 152, 0.24);
+}
+
+.reviewer-dispatch-targets button[aria-pressed="false"] {
+  border-color: rgba(78, 95, 145, 0.48);
+  background: rgba(11, 16, 32, 0.72);
+  color: #8f9bb8;
+}
+
+.reviewer-dispatch-targets b {
+  font-size: 14px;
+}
+
+.reviewer-dispatch-targets span,
+.reviewer-dispatch-note {
+  color: #aab7d6;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.reviewer-dispatch-note {
+  margin: 0;
+}
+
+.reviewer-dispatch-submit,
+.reviewer-review-submit,
+.worker-accept-actions button {
+  height: 38px;
+  border: 0;
+  border-radius: 8px;
+  color: #05111b;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.reviewer-dispatch-submit {
+  background: linear-gradient(135deg, #2fe098, #21d6e7);
+}
+
+.reviewer-review-submit {
+  background: linear-gradient(135deg, #ffcf66, #ff8d72);
+}
+
+.agent-quick-panel.worker-accept-mode {
+  width: 540px;
+  height: 330px;
+  border-color: rgba(47, 224, 152, 0.72);
+  box-shadow: 0 22px 58px rgba(47, 224, 152, 0.14), 0 22px 58px rgba(0, 0, 0, 0.48);
+}
+
+.agent-quick-panel.worker-accept-mode .agent-quick-body {
+  grid-template-columns: 1fr 0.9fr;
+}
+
+.worker-accept-card {
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  min-height: 100%;
+  padding: 18px;
+  background:
+    linear-gradient(135deg, rgba(47, 224, 152, 0.16), rgba(33, 214, 231, 0.08)),
+    #0d1426;
+}
+
+.worker-accept-card span {
+  color: #2fe098;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.worker-accept-card strong {
+  color: #edf3ff;
+  font-size: 20px;
+  line-height: 1.28;
+}
+
+.worker-accept-card p,
+.worker-accept-actions p {
+  margin: 0;
+  color: #aab7d6;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.master-delivery-card {
+  background:
+    linear-gradient(135deg, rgba(255, 207, 102, 0.18), rgba(255, 141, 114, 0.08)),
+    #0d1426;
+}
+
+.master-delivery-card span {
+  color: #ffcf66;
+}
+
+.worker-accept-actions {
+  display: grid;
+  align-content: center;
+  gap: 12px;
+  height: 100%;
+}
+
+.worker-accept-actions button {
+  background: linear-gradient(135deg, #2fe098, #21d6e7);
+}
+
 .coder-studio {
   position: fixed;
   right: 28px;
@@ -10145,6 +10361,178 @@ body.desktop-app.runtime-environment-mode .runtime-metrics {
   }
 }
 
+/* Code workspace final polish: compact agent dock and calmer review feed. */
+body.platform-mode .qf-code.open-world-content-panel.active,
+body.desktop-app.platform-mode .qf-code.open-world-content-panel.active {
+  grid-template-rows: auto minmax(0, 1fr) !important;
+  grid-template-columns: minmax(0, 1fr) 292px 330px !important;
+  grid-template-areas:
+    "head head head"
+    "code agent review" !important;
+  gap: 12px !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+body.platform-mode .qf-code .code-browser-head,
+body.desktop-app.platform-mode .qf-code .code-browser-head {
+  grid-area: head !important;
+}
+
+body.platform-mode .qf-code .code-layout,
+body.desktop-app.platform-mode .qf-code .code-layout {
+  grid-area: code !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: 100% !important;
+}
+
+body.platform-mode .qf-code .auto-code-panel.active,
+body.desktop-app.platform-mode .qf-code .auto-code-panel.active {
+  grid-area: agent !important;
+  position: relative !important;
+  inset: auto !important;
+  z-index: 2 !important;
+  width: 292px !important;
+  min-width: 292px !important;
+  max-width: 292px !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  padding: 10px !important;
+  overflow: hidden !important;
+  border-radius: 8px !important;
+}
+
+body.platform-mode .qf-code .auto-code-brand,
+body.desktop-app.platform-mode .qf-code .auto-code-brand {
+  min-height: 30px !important;
+  margin-bottom: 8px !important;
+}
+
+body.platform-mode .qf-code .auto-code-hero,
+body.desktop-app.platform-mode .qf-code .auto-code-hero {
+  grid-template-columns: 34px minmax(0, 1fr) !important;
+  gap: 8px !important;
+  min-height: 58px !important;
+  padding: 9px !important;
+}
+
+body.platform-mode .qf-code .auto-code-hero p,
+body.desktop-app.platform-mode .qf-code .auto-code-hero p,
+body.platform-mode .qf-code .auto-code-points,
+body.desktop-app.platform-mode .qf-code .auto-code-points {
+  display: none !important;
+}
+
+body.platform-mode .qf-code .auto-code-hero h3,
+body.desktop-app.platform-mode .qf-code .auto-code-hero h3 {
+  margin: 0 !important;
+  font-size: 13px !important;
+  line-height: 1.35 !important;
+}
+
+body.platform-mode .qf-code .auto-agent-grid,
+body.desktop-app.platform-mode .qf-code .auto-agent-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+}
+
+body.platform-mode .qf-code .auto-agent-grid button,
+body.desktop-app.platform-mode .qf-code .auto-agent-grid button {
+  min-height: 78px !important;
+  padding: 10px !important;
+}
+
+body.platform-mode .qf-code .agent-arbitration-note,
+body.desktop-app.platform-mode .qf-code .agent-arbitration-note {
+  min-height: 32px !important;
+  padding: 8px 10px !important;
+  font-size: 11px !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  text-overflow: ellipsis !important;
+}
+
+body.platform-mode .qf-code .auto-code-form,
+body.desktop-app.platform-mode .qf-code .auto-code-form {
+  display: grid !important;
+  grid-template-rows: minmax(74px, 1fr) 34px 38px !important;
+  gap: 8px !important;
+  min-height: 0 !important;
+}
+
+body.platform-mode .qf-code .auto-code-form textarea,
+body.desktop-app.platform-mode .qf-code .auto-code-form textarea {
+  min-height: 74px !important;
+  max-height: 120px !important;
+}
+
+body.platform-mode .qf-code .code-review-comments,
+body.desktop-app.platform-mode .qf-code .code-review-comments {
+  grid-area: review !important;
+  position: relative !important;
+  inset: auto !important;
+  width: 330px !important;
+  min-width: 330px !important;
+  max-width: 330px !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  grid-template-rows: auto auto minmax(0, 1fr) auto !important;
+  overflow: hidden !important;
+  border-radius: 8px !important;
+}
+
+body.platform-mode .qf-code .live-comments,
+body.desktop-app.platform-mode .qf-code .live-comments {
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow-y: auto !important;
+  padding-right: 4px !important;
+}
+
+body.platform-mode .qf-code .comment-bubble,
+body.desktop-app.platform-mode .qf-code .comment-bubble {
+  padding: 10px !important;
+  gap: 6px !important;
+}
+
+body.platform-mode .qf-code .comment-bubble span,
+body.desktop-app.platform-mode .qf-code .comment-bubble span {
+  display: -webkit-box !important;
+  line-height: 1.5 !important;
+  -webkit-line-clamp: 3 !important;
+  -webkit-box-orient: vertical !important;
+  overflow: hidden !important;
+}
+
+body.platform-mode .qf-code .comment-form,
+body.desktop-app.platform-mode .qf-code .comment-form {
+  grid-template-columns: 58px minmax(0, 1fr) 58px !important;
+  gap: 8px !important;
+}
+
+@media (max-width: 1280px) {
+  body.platform-mode .qf-code.open-world-content-panel.active,
+  body.desktop-app.platform-mode .qf-code.open-world-content-panel.active {
+    grid-template-columns: minmax(0, 1fr) 270px 300px !important;
+  }
+
+  body.platform-mode .qf-code .auto-code-panel.active,
+  body.desktop-app.platform-mode .qf-code .auto-code-panel.active {
+    width: 270px !important;
+    min-width: 270px !important;
+    max-width: 270px !important;
+  }
+
+  body.platform-mode .qf-code .code-review-comments,
+  body.desktop-app.platform-mode .qf-code .code-review-comments {
+    width: 300px !important;
+    min-width: 300px !important;
+    max-width: 300px !important;
+  }
+}
+
 /* Source Civilization code page final spacing pass */
 body.desktop-app.platform-mode {
   overflow: hidden !important;
@@ -11694,6 +12082,33 @@ body.desktop-app .room-toolbar span::after {
   content: " 自动适配" !important;
 }
 
+/* Task queue controls. */
+.section-title {
+  gap: 8px;
+}
+
+.section-title .count-pill {
+  margin-left: auto;
+}
+
+.queue-clear-btn {
+  height: 24px;
+  min-width: 44px;
+  padding: 0 9px;
+  border: 1px solid rgba(33, 214, 231, 0.55);
+  border-radius: 999px;
+  background: rgba(33, 214, 231, 0.12);
+  color: #7ee7ff;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.queue-clear-btn:hover {
+  background: rgba(33, 214, 231, 0.2);
+  color: #edf3ff;
+}
+
 body.desktop-app .room-toolbar span::after {
   content: " 自动适配" !important;
 }
@@ -11932,6 +12347,371 @@ body.desktop-app.runtime-environment-mode .runtime-board-metrics article {
   body.runtime-environment-mode .runtime-board-metrics,
   body.desktop-app.runtime-environment-mode .runtime-board-metrics {
     grid-template-columns: 1fr !important;
+  }
+}
+
+/* Runtime side panel final compact pass: no two-column clipping, no vertical titles. */
+body.runtime-environment-mode .runtime-cockpit-body,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-body {
+  grid-template-columns: minmax(0, 1fr) 300px !important;
+}
+
+body.runtime-environment-mode .runtime-control-dock,
+body.desktop-app.runtime-environment-mode .runtime-control-dock {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+  width: 300px !important;
+  min-width: 300px !important;
+  max-width: 300px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary,
+body.desktop-app.runtime-environment-mode .runtime-project-summary {
+  flex: 0 0 auto !important;
+  min-height: 94px !important;
+  max-height: 118px !important;
+  padding: 12px !important;
+  gap: 6px !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary span,
+body.desktop-app.runtime-environment-mode .runtime-project-summary span {
+  font-size: 10px !important;
+  line-height: 1 !important;
+  letter-spacing: 0 !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary h3,
+body.desktop-app.runtime-environment-mode .runtime-project-summary h3 {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  font-size: 15px !important;
+  line-height: 1.3 !important;
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+  transform: none !important;
+  white-space: nowrap !important;
+  word-break: normal !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary p,
+body.desktop-app.runtime-environment-mode .runtime-project-summary p {
+  display: -webkit-box !important;
+  max-height: 38px !important;
+  font-size: 11px !important;
+  line-height: 1.45 !important;
+  -webkit-line-clamp: 2 !important;
+  -webkit-box-orient: vertical !important;
+  overflow: hidden !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack,
+body.desktop-app.runtime-environment-mode .runtime-action-stack,
+body.runtime-environment-mode .runtime-mini-nav,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 8px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack,
+body.desktop-app.runtime-environment-mode .runtime-action-stack {
+  flex: 0 0 auto !important;
+}
+
+body.runtime-environment-mode .runtime-mini-nav,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav {
+  flex: 0 0 auto !important;
+  padding: 10px !important;
+}
+
+body.runtime-environment-mode .runtime-mini-nav span,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav span {
+  margin: 0 0 2px !important;
+  font-size: 10px !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack button,
+body.desktop-app.runtime-environment-mode .runtime-action-stack button,
+body.runtime-environment-mode .runtime-mini-nav button,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav button {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 34px !important;
+  padding: 0 10px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+body.runtime-environment-mode .runtime-floating-actions,
+body.desktop-app.runtime-environment-mode .runtime-floating-actions {
+  right: 314px !important;
+}
+
+@media (max-width: 1120px) {
+  body.runtime-environment-mode .runtime-cockpit-body,
+  body.desktop-app.runtime-environment-mode .runtime-cockpit-body {
+    grid-template-columns: minmax(0, 1fr) 260px !important;
+  }
+
+  body.runtime-environment-mode .runtime-control-dock,
+  body.desktop-app.runtime-environment-mode .runtime-control-dock {
+    width: 260px !important;
+    min-width: 260px !important;
+    max-width: 260px !important;
+  }
+
+  body.runtime-environment-mode .runtime-floating-actions,
+  body.desktop-app.runtime-environment-mode .runtime-floating-actions {
+    right: 274px !important;
+  }
+}
+
+/* Final runtime website view: feature directory plus embedded project preview. */
+body.runtime-environment-mode .app-shell,
+body.desktop-app.runtime-environment-mode .app-shell {
+  display: grid !important;
+  grid-template-columns: 280px minmax(0, 1fr) !important;
+  width: 100vw !important;
+  min-width: 0 !important;
+  height: 100vh !important;
+  overflow: hidden !important;
+}
+
+body.runtime-environment-mode .sidebar,
+body.desktop-app.runtime-environment-mode .sidebar {
+  display: flex !important;
+}
+
+body.runtime-environment-mode .main,
+body.desktop-app.runtime-environment-mode .main {
+  grid-column: 2 !important;
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr) !important;
+  width: 100% !important;
+  height: 100vh !important;
+  min-width: 0 !important;
+  overflow: auto !important;
+  padding: 18px 20px 22px !important;
+  background: #090d18 !important;
+}
+
+body.desktop-app.runtime-environment-mode .main {
+  height: calc(100vh - var(--desktop-chrome-height)) !important;
+}
+
+body.runtime-environment-mode .topbar,
+body.desktop-app.runtime-environment-mode .topbar {
+  grid-row: 1 !important;
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 50 !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 72px !important;
+  margin: 0 0 14px !important;
+  padding: 12px 16px !important;
+  border: 1px solid rgba(56, 68, 112, 0.62) !important;
+  border-radius: 8px !important;
+  background: rgba(9, 13, 24, 0.95) !important;
+  overflow: visible !important;
+}
+
+body.runtime-environment-mode .runtime-environment-view.active,
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  grid-row: 2 !important;
+  position: static !important;
+  inset: auto !important;
+  top: auto !important;
+  bottom: auto !important;
+  z-index: auto !important;
+  width: 100% !important;
+  max-width: none !important;
+  height: auto !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  background: transparent !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit,
+body.desktop-app.runtime-environment-mode .runtime-cockpit {
+  display: grid !important;
+  grid-template-rows: auto minmax(560px, 1fr) auto !important;
+  gap: 12px !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-head,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-head {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 172px !important;
+  height: auto !important;
+  min-height: 94px !important;
+  padding: 16px !important;
+  border-radius: 8px !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-head h2,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-head h2 {
+  font-size: 28px !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-head p,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-head p {
+  white-space: normal !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-status,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-status {
+  position: static !important;
+  width: auto !important;
+  height: auto !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-body,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-body {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 360px !important;
+  gap: 12px !important;
+  height: auto !important;
+  min-height: 560px !important;
+}
+
+body.runtime-environment-mode .runtime-floating-actions,
+body.desktop-app.runtime-environment-mode .runtime-floating-actions {
+  position: static !important;
+  display: grid !important;
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  width: 100% !important;
+  height: auto !important;
+  gap: 10px !important;
+  pointer-events: auto !important;
+}
+
+body.runtime-environment-mode .runtime-primary-actions,
+body.desktop-app.runtime-environment-mode .runtime-primary-actions,
+body.runtime-environment-mode .runtime-nav-actions,
+body.desktop-app.runtime-environment-mode .runtime-nav-actions {
+  position: static !important;
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+}
+
+body.runtime-environment-mode .runtime-nav-actions,
+body.desktop-app.runtime-environment-mode .runtime-nav-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+body.runtime-environment-mode .runtime-floating-actions button,
+body.desktop-app.runtime-environment-mode .runtime-floating-actions button,
+body.runtime-environment-mode .runtime-action-stack button,
+body.desktop-app.runtime-environment-mode .runtime-action-stack button,
+body.runtime-environment-mode .runtime-mini-nav button,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav button {
+  min-height: 36px !important;
+  height: auto !important;
+  padding: 8px 10px !important;
+  border-radius: 7px !important;
+  white-space: normal !important;
+}
+
+body.runtime-environment-mode .runtime-live-surface,
+body.desktop-app.runtime-environment-mode .runtime-live-surface {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  min-height: 560px !important;
+}
+
+body.runtime-environment-mode .runtime-control-dock,
+body.desktop-app.runtime-environment-mode .runtime-control-dock {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  grid-template-rows: auto auto auto !important;
+  align-content: start !important;
+  gap: 10px !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary,
+body.desktop-app.runtime-environment-mode .runtime-project-summary {
+  grid-column: 1 !important;
+  grid-row: auto !important;
+  height: auto !important;
+  min-height: 132px !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack,
+body.desktop-app.runtime-environment-mode .runtime-action-stack,
+body.runtime-environment-mode .runtime-mini-nav,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav {
+  position: static !important;
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  padding: 12px !important;
+  border: 1px solid rgba(56, 68, 112, 0.62) !important;
+  border-radius: 8px !important;
+  background: rgba(13, 18, 35, 0.88) !important;
+}
+
+body.runtime-environment-mode .runtime-mini-nav span,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav span {
+  grid-column: 1 / -1 !important;
+  color: #8fa6d8 !important;
+  font-size: 11px !important;
+  font-weight: 900 !important;
+  text-transform: uppercase !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-foot,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-foot {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 10px !important;
+}
+
+@media (max-width: 1240px) {
+  body.runtime-environment-mode .runtime-cockpit-body,
+  body.desktop-app.runtime-environment-mode .runtime-cockpit-body {
+    grid-template-columns: 1fr !important;
+  }
+
+  body.runtime-environment-mode .runtime-floating-actions,
+  body.desktop-app.runtime-environment-mode .runtime-floating-actions,
+  body.runtime-environment-mode .runtime-control-dock,
+  body.desktop-app.runtime-environment-mode .runtime-control-dock,
+  body.runtime-environment-mode .runtime-live-surface,
+  body.desktop-app.runtime-environment-mode .runtime-live-surface {
+    grid-column: 1 !important;
+    grid-row: auto !important;
   }
 }
 
@@ -13487,4 +14267,640 @@ body.desktop-app.runtime-environment-mode .runtime-mini-nav button {
 body.runtime-environment-mode .runtime-cockpit-foot,
 body.desktop-app.runtime-environment-mode .runtime-cockpit-foot {
   display: none !important;
+}
+/* Runtime final layout guard: keep this page from inheriting old floating rails. */
+body.runtime-environment-mode,
+body.desktop-app.runtime-environment-mode {
+  overflow: hidden !important;
+}
+
+body.runtime-environment-mode .sidebar,
+body.desktop-app.runtime-environment-mode .sidebar,
+body.runtime-environment-mode .topbar,
+body.desktop-app.runtime-environment-mode .topbar,
+body.runtime-environment-mode .agent-layer,
+body.desktop-app.runtime-environment-mode .agent-layer,
+body.runtime-environment-mode .agent-strip,
+body.desktop-app.runtime-environment-mode .agent-strip,
+body.runtime-environment-mode .bottom-panel,
+body.desktop-app.runtime-environment-mode .bottom-panel,
+body.runtime-environment-mode .workspace,
+body.desktop-app.runtime-environment-mode .workspace,
+body.runtime-environment-mode .community-view,
+body.desktop-app.runtime-environment-mode .community-view,
+body.runtime-environment-mode .open-source-world-view,
+body.desktop-app.runtime-environment-mode .open-source-world-view,
+body.runtime-environment-mode .developer-admin-view,
+body.desktop-app.runtime-environment-mode .developer-admin-view {
+  display: none !important;
+}
+
+body.runtime-environment-mode .runtime-environment-view.active,
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 40 !important;
+  display: block !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  background: #070d18 !important;
+}
+
+body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
+  top: var(--desktop-chrome-height) !important;
+  height: calc(100vh - var(--desktop-chrome-height)) !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit,
+body.desktop-app.runtime-environment-mode .runtime-cockpit {
+  position: absolute !important;
+  inset: 0 !important;
+  display: grid !important;
+  grid-template-rows: 72px minmax(0, 1fr) 92px !important;
+  width: 100% !important;
+  height: 100% !important;
+  padding: 14px !important;
+  gap: 12px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: #070d18 !important;
+  overflow: hidden !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-head,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-head {
+  position: relative !important;
+  inset: auto !important;
+  z-index: 2 !important;
+  display: grid !important;
+  grid-template-columns: minmax(280px, 1fr) auto !important;
+  align-items: center !important;
+  gap: 16px !important;
+  min-height: 0 !important;
+  padding: 14px 16px !important;
+  border: 1px solid rgba(56, 78, 130, 0.72) !important;
+  border-radius: 8px !important;
+  background: rgba(12, 19, 36, 0.96) !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-head h2,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-head h2 {
+  margin: 0 !important;
+  font-size: 20px !important;
+  line-height: 1.2 !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-head p,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-head p {
+  margin: 6px 0 0 !important;
+  max-width: 680px !important;
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+  color: #8fa1c3 !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-status,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-status {
+  position: static !important;
+  width: 190px !important;
+  min-width: 190px !important;
+  height: 48px !important;
+  padding: 7px 10px !important;
+  border-radius: 8px !important;
+  background: rgba(10, 28, 32, 0.92) !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-status strong,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-status strong {
+  font-size: 22px !important;
+  line-height: 1 !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-body,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-body {
+  position: relative !important;
+  inset: auto !important;
+  z-index: 1 !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 320px !important;
+  grid-template-areas: "preview dock" !important;
+  gap: 12px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+body.runtime-environment-mode .runtime-live-surface,
+body.desktop-app.runtime-environment-mode .runtime-live-surface {
+  grid-area: preview !important;
+  position: relative !important;
+  inset: auto !important;
+  z-index: 1 !important;
+  display: grid !important;
+  grid-template-rows: 42px minmax(0, 1fr) !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  border: 1px solid rgba(56, 78, 130, 0.68) !important;
+  border-radius: 8px !important;
+  overflow: hidden !important;
+  background: #08101f !important;
+}
+
+body.runtime-environment-mode .runtime-live-toolbar,
+body.desktop-app.runtime-environment-mode .runtime-live-toolbar {
+  height: 42px !important;
+  min-height: 42px !important;
+  padding: 8px 10px !important;
+}
+
+body.runtime-environment-mode .runtime-live-frame,
+body.desktop-app.runtime-environment-mode .runtime-live-frame {
+  position: relative !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow: hidden !important;
+}
+
+body.runtime-environment-mode .runtime-live-frame iframe,
+body.desktop-app.runtime-environment-mode .runtime-live-frame iframe {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  transform: none !important;
+}
+
+body.runtime-environment-mode .runtime-floating-actions,
+body.desktop-app.runtime-environment-mode .runtime-floating-actions {
+  position: absolute !important;
+  top: 14px !important;
+  right: 346px !important;
+  left: auto !important;
+  bottom: auto !important;
+  z-index: 8 !important;
+  display: flex !important;
+  width: auto !important;
+  max-width: calc(100vw - 390px) !important;
+  pointer-events: auto !important;
+}
+
+body.runtime-environment-mode .runtime-primary-actions,
+body.desktop-app.runtime-environment-mode .runtime-primary-actions {
+  position: static !important;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  gap: 8px !important;
+  width: auto !important;
+}
+
+body.runtime-environment-mode .runtime-nav-actions,
+body.desktop-app.runtime-environment-mode .runtime-nav-actions {
+  display: none !important;
+}
+
+body.runtime-environment-mode .runtime-floating-actions button,
+body.desktop-app.runtime-environment-mode .runtime-floating-actions button {
+  width: auto !important;
+  min-width: 118px !important;
+  height: 36px !important;
+  padding: 0 14px !important;
+  white-space: nowrap !important;
+}
+
+body.runtime-environment-mode .runtime-control-dock,
+body.desktop-app.runtime-environment-mode .runtime-control-dock {
+  grid-area: dock !important;
+  position: relative !important;
+  inset: auto !important;
+  z-index: 2 !important;
+  display: grid !important;
+  grid-template-rows: minmax(0, 1fr) auto !important;
+  gap: 12px !important;
+  width: 320px !important;
+  min-width: 320px !important;
+  max-width: 320px !important;
+  height: 100% !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary,
+body.desktop-app.runtime-environment-mode .runtime-project-summary {
+  position: relative !important;
+  inset: auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: auto !important;
+  padding: 14px !important;
+  border: 1px solid rgba(56, 78, 130, 0.68) !important;
+  border-radius: 8px !important;
+  background: rgba(12, 19, 36, 0.96) !important;
+  overflow: hidden !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack,
+body.desktop-app.runtime-environment-mode .runtime-action-stack,
+body.runtime-environment-mode .runtime-mini-nav,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav {
+  position: static !important;
+  inset: auto !important;
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: auto !important;
+  padding: 0 !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack button,
+body.desktop-app.runtime-environment-mode .runtime-action-stack button,
+body.runtime-environment-mode .runtime-mini-nav button,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav button {
+  width: 100% !important;
+  height: 34px !important;
+  min-width: 0 !important;
+  padding: 0 8px !important;
+  white-space: nowrap !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-foot,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-foot {
+  position: relative !important;
+  inset: auto !important;
+  z-index: 2 !important;
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 10px !important;
+  width: 100% !important;
+  height: 92px !important;
+  min-height: 92px !important;
+  padding: 0 !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-foot article,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-foot article {
+  min-width: 0 !important;
+  height: 100% !important;
+  padding: 12px !important;
+  border-radius: 8px !important;
+}
+
+@media (max-width: 980px) {
+  body.runtime-environment-mode .runtime-cockpit-body,
+  body.desktop-app.runtime-environment-mode .runtime-cockpit-body {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas: "preview" !important;
+  }
+
+  body.runtime-environment-mode .runtime-control-dock,
+  body.desktop-app.runtime-environment-mode .runtime-control-dock {
+    display: none !important;
+  }
+
+  body.runtime-environment-mode .runtime-floating-actions,
+  body.desktop-app.runtime-environment-mode .runtime-floating-actions {
+    right: 14px !important;
+    max-width: calc(100vw - 28px) !important;
+  }
+}
+
+/* Runtime right panel polish: compact, readable, no vertical text collapse. */
+body.runtime-environment-mode .runtime-cockpit-body,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-body {
+  grid-template-columns: minmax(0, 1fr) clamp(280px, 24vw, 340px) !important;
+}
+
+body.runtime-environment-mode .runtime-control-dock,
+body.desktop-app.runtime-environment-mode .runtime-control-dock {
+  grid-template-rows: auto auto auto minmax(0, 1fr) !important;
+  align-content: start !important;
+  width: clamp(280px, 24vw, 340px) !important;
+  min-width: 280px !important;
+  max-width: 340px !important;
+  overflow: hidden !important;
+}
+
+body.runtime-environment-mode .runtime-cockpit-status,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-status {
+  justify-self: end !important;
+  width: 210px !important;
+  min-width: 210px !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary,
+body.desktop-app.runtime-environment-mode .runtime-project-summary {
+  display: grid !important;
+  align-content: start !important;
+  gap: 8px !important;
+  max-height: 180px !important;
+  min-height: 132px !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary span,
+body.desktop-app.runtime-environment-mode .runtime-project-summary span,
+body.runtime-environment-mode .runtime-mini-nav span,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav span {
+  display: block !important;
+  width: auto !important;
+  min-width: 0 !important;
+  writing-mode: horizontal-tb !important;
+  transform: none !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  color: #6fd7ff !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary h3,
+body.desktop-app.runtime-environment-mode .runtime-project-summary h3 {
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  font-size: 17px !important;
+  line-height: 1.35 !important;
+  writing-mode: horizontal-tb !important;
+  transform: none !important;
+  white-space: normal !important;
+  word-break: break-word !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary p,
+body.desktop-app.runtime-environment-mode .runtime-project-summary p {
+  display: -webkit-box !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  font-size: 12px !important;
+  line-height: 1.55 !important;
+  writing-mode: horizontal-tb !important;
+  transform: none !important;
+  overflow: hidden !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 4 !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack,
+body.desktop-app.runtime-environment-mode .runtime-action-stack {
+  grid-template-columns: 1fr !important;
+}
+
+body.runtime-environment-mode .runtime-mini-nav,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  padding: 12px !important;
+  border: 1px solid rgba(56, 78, 130, 0.58) !important;
+  border-radius: 8px !important;
+  background: rgba(9, 15, 29, 0.82) !important;
+}
+
+body.runtime-environment-mode .runtime-mini-nav span,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav span {
+  grid-column: 1 / -1 !important;
+  margin-bottom: 2px !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack button,
+body.desktop-app.runtime-environment-mode .runtime-action-stack button {
+  height: 38px !important;
+  justify-content: center !important;
+}
+
+body.runtime-environment-mode .runtime-mini-nav button,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav button {
+  height: 36px !important;
+  font-size: 12px !important;
+}
+
+body.runtime-environment-mode .runtime-floating-actions,
+body.desktop-app.runtime-environment-mode .runtime-floating-actions {
+  right: calc(clamp(280px, 24vw, 340px) + 28px) !important;
+}
+
+@media (max-width: 1180px) {
+  body.runtime-environment-mode .runtime-cockpit-body,
+  body.desktop-app.runtime-environment-mode .runtime-cockpit-body {
+    grid-template-columns: minmax(0, 1fr) 280px !important;
+  }
+
+  body.runtime-environment-mode .runtime-control-dock,
+  body.desktop-app.runtime-environment-mode .runtime-control-dock {
+    width: 280px !important;
+    min-width: 280px !important;
+    max-width: 280px !important;
+  }
+
+  body.runtime-environment-mode .runtime-floating-actions,
+  body.desktop-app.runtime-environment-mode .runtime-floating-actions {
+    right: 294px !important;
+  }
+}
+
+@media (max-width: 760px) {
+  body.runtime-environment-mode .runtime-cockpit,
+  body.desktop-app.runtime-environment-mode .runtime-cockpit {
+    grid-template-rows: 64px minmax(0, 1fr) 76px !important;
+    padding: 10px !important;
+    gap: 10px !important;
+  }
+
+  body.runtime-environment-mode .runtime-cockpit-head,
+  body.desktop-app.runtime-environment-mode .runtime-cockpit-head {
+    grid-template-columns: 1fr !important;
+    padding: 10px 12px !important;
+  }
+
+  body.runtime-environment-mode .runtime-cockpit-head p,
+  body.desktop-app.runtime-environment-mode .runtime-cockpit-head p,
+  body.runtime-environment-mode .runtime-cockpit-status,
+  body.desktop-app.runtime-environment-mode .runtime-cockpit-status,
+  body.runtime-environment-mode .runtime-control-dock,
+  body.desktop-app.runtime-environment-mode .runtime-control-dock {
+    display: none !important;
+  }
+
+  body.runtime-environment-mode .runtime-cockpit-body,
+  body.desktop-app.runtime-environment-mode .runtime-cockpit-body {
+    grid-template-columns: 1fr !important;
+    grid-template-areas: "preview" !important;
+  }
+
+  body.runtime-environment-mode .runtime-floating-actions,
+  body.desktop-app.runtime-environment-mode .runtime-floating-actions {
+    top: auto !important;
+    right: 10px !important;
+    left: 10px !important;
+    bottom: 86px !important;
+    max-width: none !important;
+  }
+
+  body.runtime-environment-mode .runtime-primary-actions,
+  body.desktop-app.runtime-environment-mode .runtime-primary-actions {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    width: 100% !important;
+  }
+
+  body.runtime-environment-mode .runtime-floating-actions button,
+  body.desktop-app.runtime-environment-mode .runtime-floating-actions button {
+    min-width: 0 !important;
+    padding: 0 6px !important;
+    font-size: 12px !important;
+  }
+
+  body.runtime-environment-mode .runtime-cockpit-foot,
+  body.desktop-app.runtime-environment-mode .runtime-cockpit-foot {
+    height: 76px !important;
+    min-height: 76px !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+/* Runtime side panel absolute final override. Keep this block at the end. */
+body.runtime-environment-mode .runtime-cockpit-body,
+body.desktop-app.runtime-environment-mode .runtime-cockpit-body {
+  grid-template-columns: minmax(0, 1fr) 300px !important;
+}
+
+body.runtime-environment-mode .runtime-control-dock,
+body.desktop-app.runtime-environment-mode .runtime-control-dock {
+  display: flex !important;
+  flex-direction: column !important;
+  align-content: stretch !important;
+  justify-content: flex-start !important;
+  gap: 10px !important;
+  width: 300px !important;
+  min-width: 300px !important;
+  max-width: 300px !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary,
+body.desktop-app.runtime-environment-mode .runtime-project-summary {
+  flex: 0 0 auto !important;
+  display: grid !important;
+  gap: 6px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 92px !important;
+  max-height: 118px !important;
+  padding: 12px !important;
+  overflow: hidden !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary *,
+body.desktop-app.runtime-environment-mode .runtime-project-summary *,
+body.runtime-environment-mode .runtime-mini-nav *,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav * {
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+  transform: none !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary h3,
+body.desktop-app.runtime-environment-mode .runtime-project-summary h3 {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  font-size: 15px !important;
+  line-height: 1.3 !important;
+  white-space: nowrap !important;
+  word-break: normal !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary p,
+body.desktop-app.runtime-environment-mode .runtime-project-summary p {
+  display: -webkit-box !important;
+  width: 100% !important;
+  margin: 0 !important;
+  font-size: 11px !important;
+  line-height: 1.45 !important;
+  -webkit-line-clamp: 2 !important;
+  -webkit-box-orient: vertical !important;
+  overflow: hidden !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack,
+body.desktop-app.runtime-environment-mode .runtime-action-stack,
+body.runtime-environment-mode .runtime-mini-nav,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav {
+  flex: 0 0 auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+body.runtime-environment-mode .runtime-mini-nav,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav {
+  padding: 10px !important;
+  border: 1px solid rgba(56, 78, 130, 0.58) !important;
+  border-radius: 8px !important;
+  background: rgba(9, 15, 29, 0.82) !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack button,
+body.desktop-app.runtime-environment-mode .runtime-action-stack button,
+body.runtime-environment-mode .runtime-mini-nav button,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav button {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: 34px !important;
+  padding: 0 10px !important;
+  margin: 0 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+body.runtime-environment-mode .runtime-mini-nav button:nth-of-type(n + 3),
+body.desktop-app.runtime-environment-mode .runtime-mini-nav button:nth-of-type(n + 3) {
+  display: none !important;
+}
+
+body.runtime-environment-mode .runtime-floating-actions,
+body.desktop-app.runtime-environment-mode .runtime-floating-actions {
+  right: 314px !important;
+}
+
+@media (max-width: 1120px) {
+  body.runtime-environment-mode .runtime-cockpit-body,
+  body.desktop-app.runtime-environment-mode .runtime-cockpit-body {
+    grid-template-columns: minmax(0, 1fr) 260px !important;
+  }
+
+  body.runtime-environment-mode .runtime-control-dock,
+  body.desktop-app.runtime-environment-mode .runtime-control-dock {
+    width: 260px !important;
+    min-width: 260px !important;
+    max-width: 260px !important;
+  }
+
+  body.runtime-environment-mode .runtime-floating-actions,
+  body.desktop-app.runtime-environment-mode .runtime-floating-actions {
+    right: 274px !important;
+  }
 }

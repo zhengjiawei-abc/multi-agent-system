@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>QuantumFlow Desktop</title>
-    <link rel="stylesheet" href="/styles.css?v=20260604-runtime-open-external" />
+    <link rel="stylesheet" href="/styles.css?v=20260604-reviewer-accept-delivery" />
   </head>
   <body class="auth-mode">
     <header class="desktop-chrome" id="desktopChrome" aria-label="QuantumFlow desktop titlebar">
@@ -113,6 +113,7 @@
           <div class="section-title">
             <span>任务队列</span>
             <span class="count-pill" id="taskCount">6</span>
+            <button class="queue-clear-btn" id="clearTasksBtn" type="button" title="清空当前任务队列">清空</button>
           </div>
           <form class="task-form" id="taskForm">
             <input id="taskInput" type="text" placeholder="添加开发任务 / 外部消息" />
@@ -221,9 +222,9 @@
           <div class="runtime-cockpit">
             <header class="runtime-cockpit-head">
               <div>
-                <span>Runtime Testbed</span>
-                <h2>项目运行环境</h2>
-                <p>这里直接跑项目、看网页、测接口，并把失败日志回传给 Agent 纠错。</p>
+                <span>Project Website</span>
+                <h2>项目功能总览 / 运行预览</h2>
+                <p>这里直接看 QuantumFlow 有哪些功能，也能启动项目网页、测接口，并把失败日志回传给 Agent 纠错。</p>
               </div>
               <div class="runtime-cockpit-status">
                 <b id="runtimeProjectStatus">等待项目交付</b>
@@ -244,6 +245,14 @@
                   <button type="button" data-runtime-open-view="community" data-runtime-world-panel="codePanel">源文明代码区</button>
                   <button type="button" data-runtime-open-view="community" data-runtime-world-panel="issuesPanel">需求 / Issue</button>
                   <button type="button" data-runtime-open-view="developerAdmin" data-runtime-admin-panel="adminOverviewPanel">开发者管理</button>
+                  <button type="button" data-runtime-open-view="community" data-runtime-world-panel="connectorsPanel">Connector</button>
+                  <button type="button" data-runtime-open-view="community" data-runtime-world-panel="botPanel">飞书 Bot</button>
+                  <button type="button" data-runtime-open-view="openSourceWorld" data-runtime-osw-panel="oswReposPanel">开源仓库</button>
+                  <button type="button" data-runtime-open-view="openSourceWorld" data-runtime-osw-panel="oswAuditPanel">Agent 审计</button>
+                  <button type="button" data-runtime-open-view="developerAdmin" data-runtime-admin-panel="adminApiPanel">API Registry</button>
+                  <button type="button" data-runtime-open-view="developerAdmin" data-runtime-admin-panel="adminPermissionPanel">成员权限</button>
+                  <button type="button" data-runtime-open-view="profile">用户 / 项目</button>
+                  <button type="button" data-runtime-open-view="developerAdmin" data-runtime-admin-panel="adminChatPanel">Codex 群聊</button>
                 </div>
               </div>
               <main class="runtime-live-surface">
@@ -270,10 +279,17 @@
                 </section>
 
                 <section class="runtime-action-stack">
+                  <button type="button" data-runtime-open-view="warRoom">调度任务</button>
+                  <button type="button" data-runtime-open-view="community" data-runtime-world-panel="codePanel">进入代码区</button>
+                  <button type="button" data-runtime-open-view="openSourceWorld" data-runtime-osw-panel="oswDashboardPanel">开源仪表盘</button>
                 </section>
 
                 <section class="runtime-mini-nav">
                   <span>Quick Switch</span>
+                  <button type="button" data-runtime-open-view="community" data-runtime-world-panel="connectorsPanel">外部接入</button>
+                  <button type="button" data-runtime-open-view="community" data-runtime-world-panel="botPanel">Bot 会话</button>
+                  <button type="button" data-runtime-open-view="developerAdmin" data-runtime-admin-panel="adminPermissionPanel">权限</button>
+                  <button type="button" data-runtime-open-view="developerAdmin" data-runtime-admin-panel="adminChatPanel">协作者</button>
                 </section>
               </aside>
             </section>
@@ -386,12 +402,12 @@
                   <div class="auto-code-hero">
                     <div class="auto-code-icon">FLOW</div>
                     <h3>把需求交给多智能体流水线</h3>
-                    <p>任务会先进入 Master 仲裁，再交给对应 Agent 编码、测试、审查和回写。</p>
+                    <p>需求会先进入 Master 拆分，再由前端、后端、测试、Reviewer 分别写入自己的项目文件。</p>
                   </div>
                   <div class="auto-code-points">
-                    <span>Master 判断任务归属和执行顺序</span>
-                    <span>Agent 输出代码后进入 Review 门禁</span>
-                    <span>结果写入代码区，评论区继续投票修正</span>
+                    <span>前端 Agent 写 app/static/app.js</span>
+                    <span>后端 Agent 写 app/main.py</span>
+                    <span>测试和 Reviewer 写 tests 与 docs</span>
                   </div>
                   <div class="auto-agent-grid" aria-label="选择 Agent">
                     <button class="active frontend-agent" type="button" data-auto-agent="frontend"><i>UI</i><strong>前端 Agent</strong><span>界面 / 交互</span></button>
@@ -399,10 +415,10 @@
                     <button class="tester-agent" type="button" data-auto-agent="tester"><i>QA</i><strong>测试 Agent</strong><span>验收 / 校验</span></button>
                     <button class="reviewer-agent" type="button" data-auto-agent="reviewer"><i>RV</i><strong>Reviewer</strong><span>Review / 补丁</span></button>
                   </div>
-                  <div class="agent-arbitration-note" id="agentArbitrationNote">Master 会根据需求自动推荐最合适的 Agent。</div>
+                  <div class="agent-arbitration-note" id="agentArbitrationNote">选择的是主责沟通对象；执行时仍会按职责拆给所有 Agent。</div>
                   <form id="autoCodeForm" class="auto-code-form">
                     <textarea id="autoCodeInput" placeholder="/code 优化这个页面的按钮间距和评论区布局"></textarea>
-                    <select id="autoCodeOwner" class="agent-owner-select" aria-label="当前 Agent">
+                    <select id="autoCodeOwner" class="agent-owner-select" aria-label="主责沟通对象">
                       <option value="frontend">前端 Agent</option>
                       <option value="backend">后端 Agent</option>
                       <option value="tester">测试 Agent</option>
@@ -1027,7 +1043,7 @@
       </main>
     </div>
 
-    <script src="/app.js?v=20260604-runtime-open-external"></script>
+    <script src="/app.js?v=20260604-reviewer-accept-delivery"></script>
   </body>
 </html>
 

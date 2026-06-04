@@ -973,6 +973,11 @@ class SnapshotStore:
             ).fetchall()
         return [self._project_delivery_from_row(row) for row in rows]
 
+    def clear_project_deliveries(self) -> int:
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM project_delivery")
+            return cursor.rowcount
+
     def update_project_delivery_test(
         self,
         delivery_id: int,
