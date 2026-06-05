@@ -1697,9 +1697,12 @@ class SnapshotStore:
             conn.execute("UPDATE app_user SET password_hash = ? WHERE id = ?", (password_hash, user_id))
         return self.get_user(user_id)
 
-    def update_user_profile(self, user_id: int, display_name: str) -> Dict[str, Any] | None:
+    def update_user_profile(self, user_id: int, username: str, email: str = "", phone: str = "") -> Dict[str, Any] | None:
         with self._connect() as conn:
-            conn.execute("UPDATE app_user SET display_name = ? WHERE id = ?", (display_name, user_id))
+            conn.execute(
+                "UPDATE app_user SET username = ?, email = ?, phone = ? WHERE id = ?",
+                (username, email or None, phone or None, user_id),
+            )
         return self.get_user(user_id)
 
     def update_user_access(self, user_id: int, role: str | None = None, status: str | None = None) -> Dict[str, Any] | None:

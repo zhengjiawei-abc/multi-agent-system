@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>QuantumFlow Desktop</title>
-    <link rel="stylesheet" href="/styles.css?v=20260604-reviewer-accept-delivery" />
+    <link rel="stylesheet" href="/styles.css?v=20260605-repo-create-page" />
   </head>
   <body class="auth-mode">
     <header class="desktop-chrome" id="desktopChrome" aria-label="QuantumFlow desktop titlebar">
@@ -43,7 +43,7 @@
                 <label><input id="rememberPassword" type="checkbox" /> <span>记住密码</span></label>
                 <span>当天免登录</span>
               </div>
-              <button type="submit">进入战情台</button>
+              <button id="loginSubmitBtn" type="submit">进入 QuantumFlow 调度中枢</button>
             </form>
             <div class="auth-links">
               <button type="button" data-auth-view="register">注册新账号</button>
@@ -118,7 +118,6 @@
           <form class="task-form" id="taskForm">
             <input id="taskInput" type="text" placeholder="添加开发任务 / 外部消息" />
             <select id="ownerSelect">
-              <option value="master">负责人</option>
               <option value="frontend">前端</option>
               <option value="backend">后端</option>
               <option value="tester">测试</option>
@@ -237,7 +236,7 @@
               <div class="runtime-floating-actions">
                 <div class="runtime-primary-actions">
                   <button type="button" id="runtimeProjectOpenBtn">打开项目网页</button>
-                  <button type="button" id="runtimeProjectTestBtn">测试运行环境</button>
+                  <button type="button" id="runtimeProjectTestBtn">Agent 测试</button>
                   <button type="button" id="runtimeProjectFixBtn">请求 Agent 纠错</button>
                 </div>
                 <div class="runtime-nav-actions">
@@ -306,7 +305,7 @@
           <div class="open-world qf-world">
             <aside class="qf-rail">
               <section class="qf-panel qf-repos">
-                <div class="qf-panel-head"><h3>内部仓库</h3><button type="button">New</button></div>
+                <div class="qf-panel-head"><h3>内部仓库</h3><button type="button" id="repoQuickCreateBtn">新建仓库</button></div>
                 <input class="repo-search" type="text" placeholder="搜索仓库 / Connector / Agent..." />
                 <div class="repo-list" id="repoList"></div>
               </section>
@@ -366,11 +365,41 @@
                   <button type="button" data-world-panel-target="issuesPanel">Issues</button>
                   <button type="button" data-world-panel-target="taskLogsPanel">历史任务</button>
                   <button type="button" data-world-panel-target="connectorsPanel">Connector</button>
-                  <button class="primary" type="button" data-world-panel-target="botPanel">飞书 Bot</button>
+                  <button type="button" data-world-panel-target="botPanel">飞书 Bot</button>
                   <button type="button" data-world-panel-target="governancePanel">队长 / 合并</button>
                   <button type="button" data-world-panel-target="recordsPanel">采纳记录</button>
                   <button type="button" data-world-panel-target="notificationsPanel">通知 / 飞书</button>
                 </div>
+              </section>
+
+              <section class="open-world-content-panel qf-panel repositories-panel" id="repositoriesPanel">
+                <div class="qf-panel-head">
+                  <div><h3>内部仓库</h3><span>查看仓库文件、任务关联和本地协作数据</span></div>
+                  <button type="button" id="repoCreateToggleBtn">新建仓库</button>
+                </div>
+                <div class="repo-workbench">
+                  <aside class="repo-inline-sidebar">
+                    <input class="repo-search" id="repoInlineSearch" type="text" placeholder="搜索仓库 / Connector / Agent..." />
+                    <div class="repo-list" id="repoInlineList"></div>
+                  </aside>
+                  <main class="repo-detail-panel" id="repoDetailPanel"></main>
+                </div>
+              </section>
+
+              <section class="open-world-content-panel qf-panel repo-create-panel" id="repoCreatePanel">
+                <div class="qf-panel-head">
+                  <div><span>内部仓库 / 新建</span><h3>新建仓库</h3></div>
+                  <button type="button" class="repo-back-btn" data-world-panel-target="repositoriesPanel">返回列表</button>
+                </div>
+                <form class="repo-create-form" id="repoCreateForm">
+                  <label><span>仓库名称</span><input id="repoCreateName" type="text" placeholder="quantumflow-plugin" /></label>
+                  <label><span>描述</span><input id="repoCreateDesc" type="text" placeholder="这个仓库负责什么能力" /></label>
+                  <label><span>语言</span><input id="repoCreateLang" type="text" placeholder="Python / Vue / Webhook" /></label>
+                  <div class="repo-create-actions">
+                    <button type="submit">创建</button>
+                    <button type="button" data-world-panel-target="repositoriesPanel">取消</button>
+                  </div>
+                </form>
               </section>
 
               <section class="qf-code code-browser open-world-content-panel active" id="codePanel">
@@ -405,27 +434,18 @@
                     <p>需求会先进入 Master 拆分，再由前端、后端、测试、Reviewer 分别写入自己的项目文件。</p>
                   </div>
                   <div class="auto-code-points">
-                    <span>前端 Agent 写 app/static/app.js</span>
-                    <span>后端 Agent 写 app/main.py</span>
-                    <span>测试和 Reviewer 写 tests 与 docs</span>
+                    <span>不限语言，按职责写入对应项目文件</span>
+                    <span>Tester 同时测功能和跨语言兼容</span>
+                    <span>不兼容则退回原 Agent 免费重构</span>
                   </div>
                   <div class="auto-agent-grid" aria-label="选择 Agent">
-                    <button class="active frontend-agent" type="button" data-auto-agent="frontend"><i>UI</i><strong>前端 Agent</strong><span>界面 / 交互</span></button>
+                    <button class="frontend-agent active" type="button" data-auto-agent="frontend"><i>UI</i><strong>前端 Agent</strong><span>界面 / 交互</span></button>
                     <button class="backend-agent" type="button" data-auto-agent="backend"><i>API</i><strong>后端 Agent</strong><span>接口 / 数据</span></button>
                     <button class="tester-agent" type="button" data-auto-agent="tester"><i>QA</i><strong>测试 Agent</strong><span>验收 / 校验</span></button>
                     <button class="reviewer-agent" type="button" data-auto-agent="reviewer"><i>RV</i><strong>Reviewer</strong><span>Review / 补丁</span></button>
                   </div>
-                  <div class="agent-arbitration-note" id="agentArbitrationNote">选择的是主责沟通对象；执行时仍会按职责拆给所有 Agent。</div>
-                  <form id="autoCodeForm" class="auto-code-form">
-                    <textarea id="autoCodeInput" placeholder="/code 优化这个页面的按钮间距和评论区布局"></textarea>
-                    <select id="autoCodeOwner" class="agent-owner-select" aria-label="主责沟通对象">
-                      <option value="frontend">前端 Agent</option>
-                      <option value="backend">后端 Agent</option>
-                      <option value="tester">测试 Agent</option>
-                      <option value="reviewer">Reviewer</option>
-                    </select>
-                    <button type="submit">启动 Agent</button>
-                  </form>
+                  <div class="agent-arbitration-note" id="agentArbitrationNote">选择哪个 Agent，就直接写入它负责的代码文件；产物必须能运行和验收。</div>
+                  <div class="auto-agent-monitor" id="autoAgentMonitor" aria-live="polite"></div>
                 </section>
                 <section class="llm-plugin-panel" id="llmPluginPanel" aria-hidden="true">
                   <div class="llm-plugin-head">
@@ -468,7 +488,6 @@
                     <input id="issueKeywordInput" type="text" placeholder="输入关键词，例如：登录页 验证码 用户资料页" />
                     <input id="issueFileInput" type="file" />
                     <select id="issueAgentSelect">
-                      <option value="master">Master 自动分配</option>
                       <option value="frontend">前端 Agent</option>
                       <option value="backend">后端 Agent</option>
                       <option value="tester">测试 Agent</option>
@@ -494,7 +513,7 @@
 
               <section class="open-world-content-panel qf-panel" id="governancePanel">
                 <div class="qf-panel-head"><h3>队长投票 / 合并门禁</h3><span id="captainInlineName">未选出</span></div>
-                <div class="inline-governance-grid"><div class="captain-votes" id="captainVoteInlineList"></div><div class="gate-list"><div><b></b><span>建议投票最高</span></div><div><b></b><span>语法校验通过</span></div><div><b></b><span>Reviewer 无阻塞</span></div><div><b></b><span>结果可回传 App</span></div></div></div>
+                <div class="inline-governance-grid"><div class="captain-votes" id="captainVoteInlineList"></div><div class="gate-list"><div><b></b><span>Agent 内部三轮决议</span></div><div><b></b><span>语法校验通过</span></div><div><b></b><span>Reviewer 无阻塞</span></div><div><b></b><span>结果可回传 App</span></div></div></div>
               </section>
 
               <section class="open-world-content-panel qf-panel" id="recordsPanel">
@@ -600,7 +619,7 @@
 
                   <article class="osw-card osw-issues">
                     <div class="qf-panel-head">
-                      <h3>分配给我</h3>
+                      <h3>我的任务</h3>
                       <button type="button">新一期</button>
                     </div>
                     <div id="publicAssignedIssuesList">
@@ -784,7 +803,7 @@
                 <strong id="profileName">未登录</strong>
                 <span id="profileMeta">Beta Developer</span>
               </div>
-              <button class="profile-edit-button" type="button">编辑个人资料</button>
+              <button class="profile-edit-button" id="profileEditBtn" type="button">编辑个人资料</button>
               <div class="profile-side-metrics" id="profileSideMetrics"></div>
               <button class="profile-logout-button" id="logoutBtn" type="button">退出登录</button>
             </aside>
@@ -797,24 +816,17 @@
                 <p>账号资料、参与项目、协作记录和个人设置集中在这里，进入系统后可随时从右上角用户名打开。</p>
               </div>
               <nav class="profile-tabs" aria-label="用户信息导航">
-                <button class="active" type="button" data-profile-tab="overview">Overview</button>
-                <button type="button" data-profile-tab="repositories">Repositories</button>
-                <button type="button" data-profile-tab="projects">Projects</button>
-                <button type="button" data-profile-tab="activity">Activity</button>
+                <button class="active" type="button" data-profile-tab="overview">概览</button>
+                <button type="button" data-profile-tab="repositories">仓库</button>
+                <button type="button" data-profile-tab="projects">项目</button>
+                <button type="button" data-profile-tab="activity">动态</button>
+                <button type="button" data-profile-tab="personal">个人信息</button>
               </nav>
               <div class="profile-tab-panel active" data-profile-panel="overview">
-                <form class="profile-edit-form" id="profileForm">
-                <label>
-                  <span>显示名称</span>
-                  <input id="profileDisplayName" type="text" />
-                </label>
-                <button type="submit">保存资料</button>
-                <span class="profile-save-state" id="profileSaveState"></span>
-              </form>
                 <div class="profile-overview-grid" id="profileOverviewGrid"></div>
                 <section class="profile-section">
-                  <div class="profile-section-head"><span>Account</span><strong>完整账号信息</strong></div>
-                  <div class="profile-facts" id="profileFacts"></div>
+                  <div class="profile-section-head"><span>Agents</span><strong>Agent 任务状态与 Token 消耗</strong></div>
+                  <div class="profile-agent-runtime" id="profileAgentRuntimeList"></div>
                 </section>
               </div>
               <div class="profile-tab-panel" data-profile-panel="repositories">
@@ -833,6 +845,28 @@
                 <section class="profile-section">
                   <div class="profile-section-head"><span>Activity</span><strong>最近协作记录</strong></div>
                   <div class="profile-activity-list" id="profileActivityList"></div>
+                </section>
+              </div>
+              <div class="profile-tab-panel" data-profile-panel="personal">
+                <section class="profile-section">
+                  <div class="profile-section-head"><span>Profile</span><strong>个人信息</strong></div>
+                  <form class="profile-edit-form" id="profileForm">
+                    <label>
+                      <span>用户名</span>
+                      <input id="profileUsername" type="text" autocomplete="username" />
+                    </label>
+                    <label>
+                      <span>邮箱</span>
+                      <input id="profileEmail" type="email" autocomplete="email" />
+                    </label>
+                    <label>
+                      <span>手机</span>
+                      <input id="profilePhone" type="tel" autocomplete="tel" />
+                    </label>
+                    <button type="submit">保存资料</button>
+                    <span class="profile-save-state" id="profileSaveState"></span>
+                  </form>
+                  <div class="profile-facts" id="profileFacts"></div>
                 </section>
               </div>
             </main>
@@ -883,7 +917,7 @@
                     <form class="workspace-task-form" id="workspaceTaskForm">
                       <textarea id="workspaceTaskInput" placeholder="输入要一起开发的需求，例如：让 Codex 生成登录页并交给调度中枢 Agent 自动编码。"></textarea>
                       <div>
-                        <select id="workspaceTaskOwner"><option value="master">Master 协调</option><option value="frontend">Frontend Agent</option><option value="backend">Backend Agent</option><option value="tester">Tester Agent</option><option value="reviewer">Reviewer Agent</option></select>
+                        <select id="workspaceTaskOwner"><option value="frontend">Frontend Agent</option><option value="backend">Backend Agent</option><option value="tester">Tester Agent</option><option value="reviewer">Reviewer Agent</option></select>
                         <button type="submit">交给 Codex / Agent</button>
                       </div>
                     </form>
@@ -970,7 +1004,7 @@
                     <span id="adminMemberLookupState">输入 ID 后自动匹配姓名</span>
                   </div>
                   <input id="adminMemberName" type="text" placeholder="成员名称" readonly />
-                  <select id="adminMemberRole"><option>Developer</option><option>Admin</option><option>Reviewer</option><option>Guest</option></select>
+                  <select id="adminMemberRole"><option>Developer</option><option>Admin</option><option>Founder</option><option>Reviewer</option><option>Guest</option></select>
                   <input id="adminMemberProject" type="text" placeholder="项目范围，例如 QuantumFlow Core" />
                   <div class="admin-permission-picker">
                     <button type="button" data-admin-permission-toggle="war_room" aria-pressed="true">调度中枢</button>
@@ -1018,7 +1052,7 @@
         </section>
         <section class="floating-tool-window" id="governanceWindow" aria-hidden="true">
           <div class="floating-tool-head"><div><span class="project-kicker">Governance</span><h2>队长投票 / 合并门禁</h2></div><button class="icon-button floating-close" data-close-window="governanceWindow" title="关闭">×</button></div>
-          <div class="floating-tool-body two-column"><section class="qf-panel captain-card"><div class="qf-panel-head"><h3>队长投票</h3><span>最高票负责整合</span></div><p>票数最高者负责整合代码、合并建议和管理 Agent 协作。</p><div class="captain-votes" id="captainVoteList"></div></section><section class="qf-panel"><div class="qf-panel-head"><h3>合并门禁</h3><span>必须通过</span></div><div class="gate-list"><div><b></b><span>建议投票最高</span></div><div><b></b><span>语法校验通过</span></div><div><b></b><span>Reviewer 无阻塞</span></div><div><b></b><span>结果可回传 App</span></div></div></section></div>
+          <div class="floating-tool-body two-column"><section class="qf-panel captain-card"><div class="qf-panel-head"><h3>队长投票</h3><span>Agent 内部决议</span></div><p>队长由 Agent 内部自动投票三轮产生，只有三轮持续平票才进入人工审核。</p><div class="captain-votes" id="captainVoteList"></div></section><section class="qf-panel"><div class="qf-panel-head"><h3>合并门禁</h3><span>必须通过</span></div><div class="gate-list"><div><b></b><span>Agent 内部三轮决议</span></div><div><b></b><span>语法校验通过</span></div><div><b></b><span>Reviewer 无阻塞</span></div><div><b></b><span>结果可回传 App</span></div></div></section></div>
         </section>
         <section class="floating-tool-window" id="recordsWindow" aria-hidden="true">
           <div class="floating-tool-head"><div><span class="project-kicker">Accepted Changes</span><h2>采纳记录</h2></div><button class="icon-button floating-close" data-close-window="recordsWindow" title="关闭">×</button></div>
@@ -1043,7 +1077,7 @@
       </main>
     </div>
 
-    <script src="/app.js?v=20260604-reviewer-accept-delivery"></script>
+    <script src="/app.js?v=20260605-repo-create-page"></script>
   </body>
 </html>
 

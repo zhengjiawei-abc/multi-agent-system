@@ -49,6 +49,39 @@ ZEROTIER_EXE = ZEROTIER_HOME / "zerotier-one_x64.exe"
 ZEROTIER_TOKEN = ZEROTIER_HOME / "authtoken.secret"
 ZEROTIER_STATUS_FILE = ROOT / "zerotier_status.txt"
 CODEX_PROJECT_INDEX_FILE = ROOT / "codex_project_index.json"
+INTERNAL_REPO_EXCLUDED_DIRS = {
+    ".git",
+    ".agents",
+    ".codex",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "generated_repos",
+    "release",
+    "tmp_git_source_for_sync.git",
+}
+INTERNAL_REPO_TEXT_EXTENSIONS = {
+    ".bat",
+    ".css",
+    ".csv",
+    ".html",
+    ".js",
+    ".json",
+    ".jsx",
+    ".md",
+    ".mjs",
+    ".ps1",
+    ".py",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".txt",
+    ".vue",
+    ".xml",
+    ".yaml",
+    ".yml",
+}
+INTERNAL_REPO_TEXT_NAMES = {"Dockerfile", "Makefile", "README", "LICENSE", ".gitignore"}
 
 app = FastAPI(title="QuantumFlow Runtime", version="0.1.0")
 app.add_middleware(
@@ -253,7 +286,7 @@ async def auth_register(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     token = create_user_session(int(user["id"]))
     store.touch_user_login(int(user["id"]))
     store.record_task_log(None, "auth", "Auth Service", "user_registered", username, channel)
-    return {"ok": True, "token": token, "user": store.get_user(int(user["id"])) or user}
+    return {"ok": True, "token": token, "user": public_user(store.get_user(int(user["id"])) or user)}
 
 
 @app.post("/api/auth/login")
@@ -267,7 +300,7 @@ async def auth_login(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         raise HTTPException(status_code=403, detail="User is not active.")
     token = create_user_session(int(user["id"]))
     store.touch_user_login(int(user["id"]))
-    clean = store.get_user(int(user["id"])) or public_user(user)
+    clean = public_user(store.get_user(int(user["id"])) or user)
     store.record_task_log(None, "auth", "Auth Service", "user_login", str(clean.get("username") or ""), "session created")
     return {"ok": True, "token": token, "user": clean}
 
@@ -308,9 +341,21 @@ async def auth_update_profile(
     authorization: str | None = Header(default=None),
 ) -> Dict[str, Any]:
     user = current_user_from_header(authorization)
-    display_name = str(payload.get("display_name") or user["display_name"]).strip()[:60]
-    updated = store.update_user_profile(int(user["id"]), display_name)
-    return {"ok": True, "user": updated or user}
+    username = safe_username(str(payload.get("username") or user["username"]))
+    email = normalize_optional_auth_target(str(payload.get("email") or ""))
+    phone = normalize_optional_auth_target(str(payload.get("phone") or ""))
+    if not username:
+        raise HTTPException(status_code=400, detail="用户名不能为空。")
+    if email and not valid_auth_target(email, "email"):
+        raise HTTPException(status_code=400, detail="邮箱格式不正确。")
+    if phone and not valid_auth_target(phone, "phone"):
+        raise HTTPException(status_code=400, detail="手机号格式不正确。")
+    for value, label in ((username, "用户名"), (email, "邮箱"), (phone, "手机号")):
+        existing = store.find_user_by_account(value) if value else None
+        if existing and int(existing.get("id") or 0) != int(user["id"]):
+            raise HTTPException(status_code=409, detail=f"{label}已被其他账号绑定。")
+    updated = store.update_user_profile(int(user["id"]), username, email, phone)
+    return {"ok": True, "user": public_user(updated or user)}
 
 
 @app.on_event("startup")
@@ -346,6 +391,10 @@ def no_cache_file(path: Path) -> FileResponse:
 
 def normalize_auth_target(value: str) -> str:
     return value.strip().lower().replace(" ", "")
+
+
+def normalize_optional_auth_target(value: str) -> str:
+    return normalize_auth_target(value) if value.strip() else ""
 
 
 def infer_auth_channel(target: str) -> str:
@@ -433,11 +482,45 @@ def current_user_from_header(authorization: str | None) -> Dict[str, Any]:
     user = store.get_session_user(token, datetime.now().isoformat(timespec="seconds"))
     if not user:
         raise HTTPException(status_code=401, detail="Invalid or expired auth token.")
-    return user
+    return public_user(user)
 
 
 def public_user(user: Dict[str, Any]) -> Dict[str, Any]:
-    return {key: value for key, value in user.items() if key != "password_hash"}
+    clean = {key: value for key, value in user.items() if key != "password_hash"}
+    return apply_founder_identity(clean)
+
+
+def is_founder_user(user: Dict[str, Any] | None) -> bool:
+    if not user:
+        return False
+    role = str(user.get("role") or "").strip().lower()
+    return bool(user.get("founder")) or role == "founder"
+
+
+def apply_founder_identity(user: Dict[str, Any] | None) -> Dict[str, Any]:
+    if not user:
+        return {}
+    clean = dict(user)
+    if is_founder_user(clean):
+        clean["role"] = "Founder"
+        clean["title"] = "创始人"
+        clean["founder"] = True
+        clean["permissions"] = default_member_permissions("Founder")
+    return clean
+
+
+def public_admin_member(member: Dict[str, Any]) -> Dict[str, Any]:
+    clean = dict(member)
+    if is_founder_user(clean):
+        clean["role"] = "Founder"
+        clean["title"] = "创始人"
+        clean["founder"] = True
+        clean["permissions"] = default_member_permissions("Founder")
+    return clean
+
+
+def public_admin_members() -> List[Dict[str, Any]]:
+    return [public_admin_member(member) for member in store.list_admin_members()]
 
 
 def generate_invite_code() -> str:
@@ -462,6 +545,16 @@ def current_public_tunnel() -> Dict[str, Any] | None:
 
 def default_member_permissions(role: str) -> Dict[str, bool]:
     normalized = role.strip().lower()
+    if normalized in {"founder", "owner"}:
+        return {
+            "war_room": True,
+            "source_world": True,
+            "workspace": True,
+            "api_registry": True,
+            "member_admin": True,
+            "founder_override": True,
+            "system_owner": True,
+        }
     if normalized == "admin":
         return {
             "war_room": True,
@@ -716,7 +809,7 @@ async def realtime_status() -> Dict[str, Any]:
 
 @app.get("/api/admin/members")
 async def admin_members() -> List[Dict[str, Any]]:
-    return store.list_admin_members()
+    return public_admin_members()
 
 
 @app.get("/api/admin/users/{user_id}")
@@ -742,8 +835,12 @@ async def add_admin_member(payload: Dict[str, Any] = Body(...), authorization: s
     if not name:
         raise HTTPException(status_code=400, detail="Member name is required.")
     role = str(payload.get("role") or "Developer").strip() or "Developer"
+    if is_founder_user(user):
+        role = "Founder"
     project_scope = str(payload.get("project_scope") or "QuantumFlow Core").strip()[:120] or "QuantumFlow Core"
     permissions = payload.get("permissions") if isinstance(payload.get("permissions"), dict) else default_member_permissions(role)
+    if role.lower() == "founder":
+        permissions = default_member_permissions("Founder")
     invite_code = str(payload.get("invite_code") or "").strip()[:40]
     member = store.add_admin_member(
         name=name[:80],
@@ -755,34 +852,36 @@ async def add_admin_member(payload: Dict[str, Any] = Body(...), authorization: s
     )
     if user_id is not None:
         store.update_user_access(user_id, role=role[:80], status="active")
-        member = next((item for item in store.list_admin_members() if item["id"] == member["id"]), member)
-        member["user"] = store.get_user(user_id)
-    await broadcast({"kind": "admin_members", "data": store.list_admin_members()})
-    return member
+        member = next((item for item in public_admin_members() if item["id"] == member["id"]), public_admin_member(member))
+        member["user"] = public_user(store.get_user(user_id) or {})
+    await broadcast({"kind": "admin_members", "data": public_admin_members()})
+    return public_admin_member(member)
 
 
 @app.patch("/api/admin/members/{member_id}")
 async def update_admin_member(member_id: int, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    existing = next((item for item in public_admin_members() if item["id"] == member_id), None)
+    founder_member = bool(existing and existing.get("founder"))
     permissions = payload.get("permissions") if isinstance(payload.get("permissions"), dict) else None
     member = store.update_admin_member(
         member_id,
-        role=str(payload.get("role")).strip() if payload.get("role") else None,
+        role="Founder" if founder_member else (str(payload.get("role")).strip() if payload.get("role") else None),
         status=str(payload.get("status")).strip() if payload.get("status") else None,
         project_scope=str(payload.get("project_scope")).strip() if payload.get("project_scope") else None,
-        permissions=permissions,
+        permissions=default_member_permissions("Founder") if founder_member else permissions,
         invite_code=str(payload.get("invite_code")).strip() if payload.get("invite_code") is not None else None,
     )
     if not member:
         raise HTTPException(status_code=404, detail="Member not found.")
-    await broadcast({"kind": "admin_members", "data": store.list_admin_members()})
-    return member
+    await broadcast({"kind": "admin_members", "data": public_admin_members()})
+    return public_admin_member(member)
 
 
 @app.delete("/api/admin/members/{member_id}")
 async def delete_admin_member(member_id: int) -> Dict[str, Any]:
     if not store.delete_admin_member(member_id):
         raise HTTPException(status_code=404, detail="Member not found.")
-    await broadcast({"kind": "admin_members", "data": store.list_admin_members()})
+    await broadcast({"kind": "admin_members", "data": public_admin_members()})
     return {"ok": True, "id": member_id}
 
 
@@ -920,6 +1019,124 @@ async def code_artifacts(limit: int = 50) -> List[Dict[str, Any]]:
     artifacts = store.recent_code_artifacts(limit=max(1, min(limit * 3, 200)))
     visible = [artifact for artifact in artifacts if not is_legacy_stub_artifact(artifact)]
     return visible[: max(1, min(limit, 200))]
+
+
+@app.get("/api/internal-repos")
+async def internal_repos(limit: int = 80) -> List[Dict[str, Any]]:
+    rows = scan_internal_repositories(limit=max(1, min(limit, 120)))
+    return rows
+
+
+def scan_internal_repositories(limit: int = 80) -> List[Dict[str, Any]]:
+    roots: List[Path] = []
+    if ROOT.exists():
+        roots.append(ROOT)
+        for child in sorted(ROOT.iterdir(), key=lambda item: item.name.lower()):
+            if child.is_dir() and child.name not in INTERNAL_REPO_EXCLUDED_DIRS:
+                roots.append(child)
+    repos: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for path in roots:
+        if len(repos) >= limit:
+            break
+        resolved = path.resolve()
+        if str(resolved) in seen:
+            continue
+        seen.add(str(resolved))
+        repo = build_internal_repo_row(resolved)
+        if repo:
+            repos.append(repo)
+    return repos
+
+
+def build_internal_repo_row(path: Path) -> Dict[str, Any] | None:
+    if not path.exists() or not path.is_dir():
+        return None
+    files = collect_repo_files(path)
+    if not files:
+        return None
+    name = path.name if path != ROOT else "agent-workspace"
+    return {
+        "id": safe_repo_name(name).lower() or "agent-workspace",
+        "name": name,
+        "desc": str(path),
+        "lang": infer_repo_language(files),
+        "stars": 0,
+        "workspace": True,
+        "path": str(path),
+        "files": files,
+    }
+
+
+def collect_repo_files(path: Path, max_files: int = 140, max_depth: int = 5) -> Dict[str, List[str]]:
+    files: Dict[str, List[str]] = {}
+    stack: List[tuple[Path, int]] = [(path, 0)]
+    root = path.resolve()
+    while stack and len(files) < max_files:
+        current, depth = stack.pop()
+        if depth > max_depth:
+            continue
+        try:
+            children = sorted(current.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower()))
+        except OSError:
+            continue
+        for child in children:
+            if len(files) >= max_files:
+                break
+            if child.name in INTERNAL_REPO_EXCLUDED_DIRS or child.name.startswith(".pytest_cache"):
+                continue
+            if child.is_dir():
+                stack.append((child, depth + 1))
+                continue
+            if not is_internal_repo_text_file(child):
+                continue
+            try:
+                rel = child.resolve().relative_to(root).as_posix()
+            except ValueError:
+                continue
+            files[rel] = read_internal_repo_file_lines(child)
+    return dict(sorted(files.items(), key=lambda item: item[0].lower()))
+
+
+def is_internal_repo_text_file(path: Path) -> bool:
+    if path.name in INTERNAL_REPO_TEXT_NAMES:
+        return True
+    if path.suffix.lower() not in INTERNAL_REPO_TEXT_EXTENSIONS:
+        return False
+    try:
+        return path.stat().st_size <= 240_000
+    except OSError:
+        return False
+
+
+def read_internal_repo_file_lines(path: Path, max_lines: int = 180) -> List[str]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except UnicodeDecodeError:
+            text = path.read_text(encoding="gb18030", errors="replace")
+    except OSError:
+        return ["// 无法读取文件"]
+    lines = text.splitlines()
+    if len(lines) > max_lines:
+        return [*lines[:max_lines], f"... 文件较长，已截取前 {max_lines} 行"]
+    return lines or [""]
+
+
+def infer_repo_language(files: Dict[str, List[str]]) -> str:
+    names = list(files.keys())
+    suffixes = [Path(name).suffix.lower() for name in names]
+    if "package.json" in names or any(suffix in {".js", ".ts", ".vue", ".tsx", ".jsx"} for suffix in suffixes):
+        return "JavaScript/Vue"
+    if any(suffix == ".py" for suffix in suffixes):
+        return "Python"
+    if any(suffix in {".ps1", ".bat"} for suffix in suffixes):
+        return "Scripts"
+    if any(suffix in {".md", ".txt"} for suffix in suffixes):
+        return "Docs"
+    return "Code"
 
 
 def _sync_llm_completion(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1470,13 +1687,14 @@ async def set_connector_config(payload: Dict[str, Any] = Body(...)) -> Dict[str,
 async def create_task(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     title = str(payload.get("title", "")).strip()
     owner_id = str(payload.get("owner_id", "master")).strip()
+    source = str(payload.get("source") or "desktop").strip() or "desktop"
     if not title:
         raise HTTPException(status_code=400, detail="Task title is required.")
     if owner_id not in runtime.agents:
         raise HTTPException(status_code=400, detail=f"Unknown owner_id: {owner_id}")
 
     x, y = next_station(owner_id)
-    task = runtime.add_task(title, owner_id, x, y, source="desktop")
+    task = runtime.add_task(title, owner_id, x, y, source=source)
     store.record_task_log(task.id, owner_id, runtime.agents[owner_id].role, "task_created", title)
     await broadcast({"kind": "snapshot", "data": runtime_snapshot()})
     schedule_auto_dispatch("desktop_task_created")
@@ -2439,7 +2657,10 @@ def validate_project_delivery(project_path: Path) -> Dict[str, Any]:
         missing = [str(path.relative_to(project_path)) for path in required if not path.exists()]
         if missing:
             return {"ok": False, "reason": f"缺少文件：{', '.join(missing)}"}
-        return {"ok": True, "reason": "Vue3 前端项目结构完整，可 npm install 后运行。"}
+        compat = validate_cross_language_compatibility(project_path)
+        if not compat["ok"]:
+            return compat
+        return {"ok": True, "reason": "Vue3 前端项目结构完整，跨语言/运行入口兼容门禁通过，可 npm install 后运行。"}
     required = [
         project_path / "README.md",
         project_path / "requirements.txt",
@@ -2454,7 +2675,42 @@ def validate_project_delivery(project_path: Path) -> Dict[str, Any]:
         ast.parse((project_path / "app" / "main.py").read_text(encoding="utf-8"))
     except SyntaxError as exc:
         return {"ok": False, "reason": f"app/main.py 语法错误 line {exc.lineno}"}
-    return {"ok": True, "reason": "项目结构完整，Python 语法通过，可解压后安装依赖运行。"}
+    compat = validate_cross_language_compatibility(project_path)
+    if not compat["ok"]:
+        return compat
+    return {"ok": True, "reason": "项目结构完整，Python 语法和跨语言接口兼容门禁通过，可解压后安装依赖运行。"}
+
+
+def validate_cross_language_compatibility(project_path: Path) -> Dict[str, Any]:
+    if (project_path / "package.json").exists():
+        package_text = (project_path / "package.json").read_text(encoding="utf-8", errors="ignore")
+        html_text = (project_path / "index.html").read_text(encoding="utf-8", errors="ignore")
+        main_text = (project_path / "src" / "main.js").read_text(encoding="utf-8", errors="ignore")
+        test_text = (project_path / "tests" / "book.spec.js").read_text(encoding="utf-8", errors="ignore")
+        checks = [
+            ("package.json 缺少 test 脚本", '"test"' in package_text),
+            ("index.html 缺少浏览器模块入口", 'type="module"' in html_text),
+            ("src/main.js 缺少 Vue3 挂载入口", "createApp" in main_text),
+            ("测试文件缺少兼容性断言", "compat" in test_text or "frontend-only" in test_text),
+        ]
+    else:
+        backend_text = (project_path / "app" / "main.py").read_text(encoding="utf-8", errors="ignore")
+        frontend_text = (project_path / "app" / "static" / "app.js").read_text(encoding="utf-8", errors="ignore")
+        test_text = (project_path / "tests" / "test_smoke.py").read_text(encoding="utf-8", errors="ignore")
+        checks = [
+            ("后端缺少 /api/health", '"/api/health"' in backend_text),
+            ("后端缺少 /api/tasks", '"/api/tasks"' in backend_text),
+            ("前端未调用 /api/tasks", '"/api/tasks"' in frontend_text or "'/api/tasks'" in frontend_text),
+            ("测试缺少跨语言兼容性断言", "compatibility" in test_text or "cross_language" in test_text),
+        ]
+    failed = [reason for reason, ok in checks if not ok]
+    if failed:
+        return {
+            "ok": False,
+            "reason": "兼容性门禁失败，已退回原负责 Agent 免费重构（token 返还）："
+            + "；".join(failed),
+        }
+    return {"ok": True, "reason": "跨语言兼容性门禁通过。"}
 
 
 def business_project_files(title: str, task_id: str) -> Dict[str, str]:
@@ -2568,39 +2824,13 @@ def vue3_frontend_project_files(task_id: str, title: str, spec: Dict[str, Any]) 
     }
 
 
-def generated_vue3_frontend_readme(task_id: str, title: str, spec: Dict[str, Any]) -> str:
-    return f"""# {title}
-
-这是 QuantumFlow 根据需求理解生成的 Vue3 图书管理前端项目。
-
-## 需求理解
-
-- 业务领域：图书管理 / 馆藏管理
-- 技术栈：Vue3
-- 开发范围：前端页面，不强行生成后端任务系统
-- 核心功能：图书搜索、分类筛选、状态筛选、新增图书、借出/归还/预约状态切换、统计面板
-
-## Agent 分工
-
-- 前端 Agent：生成 `src/main.js`、`src/App.vue`、`src/style.css`
-- 测试 Agent：生成 `tests/book.spec.js`，检查关键业务文案和 Vue3 挂载点
-- Reviewer：生成 `docs/review-checklist.md`
-
-## 运行
-
-```powershell
-npm install
-npm run dev
-```
-
-当前桌面预览会直接用静态模式打开 `index.html`，便于先看页面效果。
-
-任务 ID：{task_id}
-"""
+def library_app_title(_title: str) -> str:
+    return "图书管理系统"
 
 
 def generated_vue3_library_main_js(task_id: str, title: str, books: List[Dict[str, str]]) -> str:
     books_json = json.dumps(books, ensure_ascii=False, indent=2)
+    app_title = library_app_title(title)
     return f"""import {{ createApp, computed, reactive }} from "https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js";
 
 const initialBooks = {books_json};
@@ -2609,90 +2839,122 @@ const App = {{
   setup() {{
     const state = reactive({{
       taskId: {task_id!r},
-      title: {title!r},
-      keyword: "",
-      category: "全部",
-      status: "全部",
-      form: {{ title: "", author: "", category: "综合", status: "在馆" }},
-      books: initialBooks.map((book, index) => ({{ id: index + 1, ...book }})),
+      title: {app_title!r},
+      query: "",
+      category: "全部分类",
+      status: "全部状态",
+      form: {{
+        accessionNo: "",
+        title: "",
+        author: "",
+        publisher: "",
+        category: "软件工程",
+        status: "在馆",
+      }},
+      books: initialBooks.map((book, index) => ({{
+        id: index + 1,
+        accessionNo: `B-2026-${{String(index + 1).padStart(3, "0")}}`,
+        publisher: index === 0 ? "Addison-Wesley" : index === 1 ? "Microsoft Press" : "Pearson",
+        publishDate: "2026-06-05",
+        ...book,
+      }})),
     }});
 
-    const categories = computed(() => ["全部", ...new Set(state.books.map((book) => book.category))]);
-    const statusOptions = ["全部", "在馆", "借出", "预约"];
+    const categories = computed(() => ["全部分类", ...new Set(state.books.map((book) => book.category))]);
+    const statusOptions = ["全部状态", "在馆", "借出", "预约", "维护"];
     const filteredBooks = computed(() => {{
-      const keyword = state.keyword.trim().toLowerCase();
+      const query = state.query.trim().toLowerCase();
       return state.books.filter((book) => {{
-        const text = `${{book.title}} ${{book.author}} ${{book.category}} ${{book.status}}`.toLowerCase();
-        return (!keyword || text.includes(keyword)) &&
-          (state.category === "全部" || book.category === state.category) &&
-          (state.status === "全部" || book.status === state.status);
+        const text = `${{book.accessionNo}} ${{book.title}} ${{book.author}} ${{book.publisher}} ${{book.category}} ${{book.status}}`.toLowerCase();
+        return (!query || text.includes(query)) &&
+          (state.category === "全部分类" || book.category === state.category) &&
+          (state.status === "全部状态" || book.status === state.status);
       }});
     }});
     const stats = computed(() => ({{
       total: state.books.length,
       available: state.books.filter((book) => book.status === "在馆").length,
       borrowed: state.books.filter((book) => book.status === "借出").length,
-      reserved: state.books.filter((book) => book.status === "预约").length,
+      categories: new Set(state.books.map((book) => book.category)).size,
     }}));
 
     function addBook() {{
       if (!state.form.title.trim() || !state.form.author.trim()) return;
       state.books.unshift({{
         id: Date.now(),
-        title: state.form.title.trim(),
-        author: state.form.author.trim(),
-        category: state.form.category.trim() || "综合",
-        status: state.form.status,
+        accessionNo: state.form.accessionNo.trim() || `B-2026-${{Date.now().toString().slice(-4)}}`,
+        publishDate: new Date().toISOString().slice(0, 10),
+        ...state.form,
       }});
-      state.form = {{ title: "", author: "", category: "综合", status: "在馆" }};
+      state.form = {{ accessionNo: "", title: "", author: "", publisher: "", category: "软件工程", status: "在馆" }};
     }}
-
-    function cycleStatus(book) {{
-      const flow = ["在馆", "借出", "预约"];
-      book.status = flow[(flow.indexOf(book.status) + 1) % flow.length];
+    function setStatus(book, status) {{
+      book.status = status;
     }}
-
-    return {{ state, categories, statusOptions, filteredBooks, stats, addBook, cycleStatus }};
+    function removeBook(id) {{
+      const index = state.books.findIndex((book) => book.id === id);
+      if (index >= 0) state.books.splice(index, 1);
+    }}
+    return {{ state, categories, statusOptions, filteredBooks, stats, addBook, setStatus, removeBook }};
   }},
   template: `
-    <main class="library-shell">
-      <section class="hero">
-        <span>Vue3 Library Console</span>
-        <h1>{{{{ state.title }}}}</h1>
-        <p>面向图书馆和小型团队的馆藏管理前端：搜索、筛选、新增、借阅状态切换都在一个页面内完成。</p>
-      </section>
-
-      <section class="stats">
-        <article><strong>{{{{ stats.total }}}}</strong><span>馆藏总数</span></article>
-        <article><strong>{{{{ stats.available }}}}</strong><span>在馆</span></article>
-        <article><strong>{{{{ stats.borrowed }}}}</strong><span>借出</span></article>
-        <article><strong>{{{{ stats.reserved }}}}</strong><span>预约</span></article>
-      </section>
-
-      <section class="toolbar">
-        <input v-model="state.keyword" placeholder="搜索书名、作者、分类或状态" />
-        <select v-model="state.category"><option v-for="item in categories" :key="item">{{{{ item }}}}</option></select>
-        <select v-model="state.status"><option v-for="item in statusOptions" :key="item">{{{{ item }}}}</option></select>
-      </section>
-
-      <form class="book-form" @submit.prevent="addBook">
-        <input v-model="state.form.title" placeholder="书名" />
-        <input v-model="state.form.author" placeholder="作者" />
-        <input v-model="state.form.category" placeholder="分类" />
-        <select v-model="state.form.status"><option>在馆</option><option>借出</option><option>预约</option></select>
-        <button>新增图书</button>
-      </form>
-
-      <section class="book-grid">
-        <article v-for="book in filteredBooks" :key="book.id" class="book-card">
-          <div>
-            <strong>{{{{ book.title }}}}</strong>
-            <span>{{{{ book.author }}}} / {{{{ book.category }}}}</span>
+    <div class="library-admin">
+      <aside class="library-sidebar">
+        <div class="system-title">Sistema de Administracion de Biblioteca</div>
+        <button class="side-item active">图书管理</button>
+        <button class="side-item">借阅人</button>
+        <button class="side-item">借出图书</button>
+        <button class="side-item">归还图书</button>
+        <button class="side-item">分类</button>
+        <button class="side-item">用户</button>
+        <button class="side-item">报表</button>
+      </aside>
+      <main class="library-workbench">
+        <header class="library-topbar">
+          <h1>{{{{ state.title }}}}</h1>
+          <span>Vue3 / Manage Books</span>
+        </header>
+        <section class="summary-strip">
+          <article><strong>{{{{ stats.total }}}}</strong><span>馆藏总数</span></article>
+          <article><strong>{{{{ stats.available }}}}</strong><span>在馆</span></article>
+          <article><strong>{{{{ stats.borrowed }}}}</strong><span>借出</span></article>
+          <article><strong>{{{{ stats.categories }}}}</strong><span>分类</span></article>
+        </section>
+        <section class="manage-panel">
+          <div class="panel-title">Manage Books</div>
+          <form class="book-editor" @submit.prevent="addBook">
+            <label>Accession No.<input v-model="state.form.accessionNo" placeholder="例如 B-2026-004" /></label>
+            <label>Book Title<input v-model="state.form.title" placeholder="书名" /></label>
+            <label>Author<input v-model="state.form.author" placeholder="作者" /></label>
+            <label>Publisher<input v-model="state.form.publisher" placeholder="出版社" /></label>
+            <label>Category<input v-model="state.form.category" placeholder="分类" /></label>
+            <label>Status<select v-model="state.form.status"><option>在馆</option><option>借出</option><option>预约</option><option>维护</option></select></label>
+            <div class="form-actions"><button type="submit">Grabar</button><button type="button" @click="state.form = {{ accessionNo: '', title: '', author: '', publisher: '', category: '软件工程', status: '在馆' }}">Nuevo</button></div>
+          </form>
+          <div class="search-row">
+            <label>Buscar<input v-model="state.query" placeholder="搜索书名、作者、编号或分类" /></label>
+            <select v-model="state.category"><option v-for="item in categories" :key="item">{{{{ item }}}}</option></select>
+            <select v-model="state.status"><option v-for="item in statusOptions" :key="item">{{{{ item }}}}</option></select>
           </div>
-          <button :class="'status-' + book.status" @click="cycleStatus(book)">{{{{ book.status }}}}</button>
-        </article>
-      </section>
-    </main>
+          <table class="book-table">
+            <thead><tr><th>Accession</th><th>Book Title</th><th>Description</th><th>Author</th><th>Publish Date</th><th>Publisher</th><th>Category</th><th>Status</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr v-for="book in filteredBooks" :key="book.id">
+                <td>{{{{ book.accessionNo }}}}</td>
+                <td>{{{{ book.title }}}}</td>
+                <td>{{{{ book.category }}}} / {{{{ book.status }}}}</td>
+                <td>{{{{ book.author }}}}</td>
+                <td>{{{{ book.publishDate }}}}</td>
+                <td>{{{{ book.publisher }}}}</td>
+                <td>{{{{ book.category }}}}</td>
+                <td><select :value="book.status" @change="setStatus(book, $event.target.value)"><option>在馆</option><option>借出</option><option>预约</option><option>维护</option></select></td>
+                <td><button class="text-button" @click="removeBook(book.id)">删除</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      </main>
+    </div>
   `,
 }};
 
@@ -2702,86 +2964,128 @@ createApp(App).mount("#app");
 
 def generated_vue3_library_app_vue(title: str, books: List[Dict[str, str]]) -> str:
     books_json = json.dumps(books, ensure_ascii=False, indent=2)
+    app_title = library_app_title(title)
     return f"""<script setup>
 import {{ computed, reactive }} from "vue";
 
 const state = reactive({{
-  title: {title!r},
-  keyword: "",
-  category: "全部",
-  status: "全部",
-  form: {{ title: "", author: "", category: "综合", status: "在馆" }},
-  books: {books_json}.map((book, index) => ({{ id: index + 1, ...book }})),
+  title: {app_title!r},
+  query: "",
+  category: "全部分类",
+  status: "全部状态",
+  form: {{ accessionNo: "", title: "", author: "", publisher: "", category: "软件工程", status: "在馆" }},
+  books: {books_json}.map((book, index) => ({{
+    id: index + 1,
+    accessionNo: `B-2026-${{String(index + 1).padStart(3, "0")}}`,
+    publisher: index === 0 ? "Addison-Wesley" : index === 1 ? "Microsoft Press" : "Pearson",
+    publishDate: "2026-06-05",
+    ...book,
+  }})),
 }});
 
-const categories = computed(() => ["全部", ...new Set(state.books.map((book) => book.category))]);
-const statusOptions = ["全部", "在馆", "借出", "预约"];
+const categories = computed(() => ["全部分类", ...new Set(state.books.map((book) => book.category))]);
+const statusOptions = ["全部状态", "在馆", "借出", "预约", "维护"];
 const filteredBooks = computed(() => {{
-  const keyword = state.keyword.trim().toLowerCase();
+  const query = state.query.trim().toLowerCase();
   return state.books.filter((book) => {{
-    const text = `${{book.title}} ${{book.author}} ${{book.category}} ${{book.status}}`.toLowerCase();
-    return (!keyword || text.includes(keyword)) &&
-      (state.category === "全部" || book.category === state.category) &&
-      (state.status === "全部" || book.status === state.status);
+    const text = `${{book.accessionNo}} ${{book.title}} ${{book.author}} ${{book.publisher}} ${{book.category}} ${{book.status}}`.toLowerCase();
+    return (!query || text.includes(query)) &&
+      (state.category === "全部分类" || book.category === state.category) &&
+      (state.status === "全部状态" || book.status === state.status);
   }});
 }});
 const stats = computed(() => ({{
   total: state.books.length,
   available: state.books.filter((book) => book.status === "在馆").length,
   borrowed: state.books.filter((book) => book.status === "借出").length,
-  reserved: state.books.filter((book) => book.status === "预约").length,
+  categories: new Set(state.books.map((book) => book.category)).size,
 }}));
 
 function addBook() {{
   if (!state.form.title.trim() || !state.form.author.trim()) return;
-  state.books.unshift({{ id: Date.now(), ...state.form }});
-  state.form = {{ title: "", author: "", category: "综合", status: "在馆" }};
+  state.books.unshift({{
+    id: Date.now(),
+    accessionNo: state.form.accessionNo.trim() || `B-2026-${{Date.now().toString().slice(-4)}}`,
+    publishDate: new Date().toISOString().slice(0, 10),
+    ...state.form,
+  }});
+  state.form = {{ accessionNo: "", title: "", author: "", publisher: "", category: "软件工程", status: "在馆" }};
 }}
 
-function cycleStatus(book) {{
-  const flow = ["在馆", "借出", "预约"];
-  book.status = flow[(flow.indexOf(book.status) + 1) % flow.length];
+function setStatus(book, status) {{
+  book.status = status;
+}}
+
+function removeBook(id) {{
+  const index = state.books.findIndex((book) => book.id === id);
+  if (index >= 0) state.books.splice(index, 1);
 }}
 </script>
 
 <template>
-  <main class="library-shell">
-    <section class="hero">
-      <span>Vue3 Library Console</span>
-      <h1>{{{{ state.title }}}}</h1>
-      <p>图书搜索、分类筛选、新增图书和借阅状态管理。</p>
-    </section>
-    <section class="stats">
-      <article><strong>{{{{ stats.total }}}}</strong><span>馆藏总数</span></article>
-      <article><strong>{{{{ stats.available }}}}</strong><span>在馆</span></article>
-      <article><strong>{{{{ stats.borrowed }}}}</strong><span>借出</span></article>
-      <article><strong>{{{{ stats.reserved }}}}</strong><span>预约</span></article>
-    </section>
-    <section class="toolbar">
-      <input v-model="state.keyword" placeholder="搜索书名、作者、分类或状态" />
-      <select v-model="state.category"><option v-for="item in categories" :key="item">{{{{ item }}}}</option></select>
-      <select v-model="state.status"><option v-for="item in statusOptions" :key="item">{{{{ item }}}}</option></select>
-    </section>
-    <form class="book-form" @submit.prevent="addBook">
-      <input v-model="state.form.title" placeholder="书名" />
-      <input v-model="state.form.author" placeholder="作者" />
-      <input v-model="state.form.category" placeholder="分类" />
-      <select v-model="state.form.status"><option>在馆</option><option>借出</option><option>预约</option></select>
-      <button>新增图书</button>
-    </form>
-    <section class="book-grid">
-      <article v-for="book in filteredBooks" :key="book.id" class="book-card">
-        <div><strong>{{{{ book.title }}}}</strong><span>{{{{ book.author }}}} / {{{{ book.category }}}}</span></div>
-        <button :class="'status-' + book.status" @click="cycleStatus(book)">{{{{ book.status }}}}</button>
-      </article>
-    </section>
-  </main>
+  <div class="library-admin">
+    <aside class="library-sidebar">
+      <div class="system-title">Sistema de Administracion de Biblioteca</div>
+      <button class="side-item active">图书管理</button>
+      <button class="side-item">借阅人</button>
+      <button class="side-item">借出图书</button>
+      <button class="side-item">归还图书</button>
+      <button class="side-item">分类</button>
+      <button class="side-item">用户</button>
+      <button class="side-item">报表</button>
+    </aside>
+    <main class="library-workbench">
+      <header class="library-topbar">
+        <h1>{{{{ state.title }}}}</h1>
+        <span>Vue3 / Manage Books</span>
+      </header>
+      <section class="summary-strip">
+        <article><strong>{{{{ stats.total }}}}</strong><span>馆藏总数</span></article>
+        <article><strong>{{{{ stats.available }}}}</strong><span>在馆</span></article>
+        <article><strong>{{{{ stats.borrowed }}}}</strong><span>借出</span></article>
+        <article><strong>{{{{ stats.categories }}}}</strong><span>分类</span></article>
+      </section>
+      <section class="manage-panel">
+        <div class="panel-title">Manage Books</div>
+        <form class="book-editor" @submit.prevent="addBook">
+          <label>Accession No.<input v-model="state.form.accessionNo" placeholder="例如 B-2026-004" /></label>
+          <label>Book Title<input v-model="state.form.title" placeholder="书名" /></label>
+          <label>Author<input v-model="state.form.author" placeholder="作者" /></label>
+          <label>Publisher<input v-model="state.form.publisher" placeholder="出版社" /></label>
+          <label>Category<input v-model="state.form.category" placeholder="分类" /></label>
+          <label>Status<select v-model="state.form.status"><option>在馆</option><option>借出</option><option>预约</option><option>维护</option></select></label>
+          <div class="form-actions"><button type="submit">Grabar</button><button type="button" @click="state.form = {{ accessionNo: '', title: '', author: '', publisher: '', category: '软件工程', status: '在馆' }}">Nuevo</button></div>
+        </form>
+        <div class="search-row">
+          <label>Buscar<input v-model="state.query" placeholder="搜索书名、作者、编号或分类" /></label>
+          <select v-model="state.category"><option v-for="item in categories" :key="item">{{{{ item }}}}</option></select>
+          <select v-model="state.status"><option v-for="item in statusOptions" :key="item">{{{{ item }}}}</option></select>
+        </div>
+        <table class="book-table">
+          <thead><tr><th>Accession</th><th>Book Title</th><th>Description</th><th>Author</th><th>Publish Date</th><th>Publisher</th><th>Category</th><th>Status</th><th>Action</th></tr></thead>
+          <tbody>
+            <tr v-for="book in filteredBooks" :key="book.id">
+              <td>{{{{ book.accessionNo }}}}</td>
+              <td>{{{{ book.title }}}}</td>
+              <td>{{{{ book.category }}}} / {{{{ book.status }}}}</td>
+              <td>{{{{ book.author }}}}</td>
+              <td>{{{{ book.publishDate }}}}</td>
+              <td>{{{{ book.publisher }}}}</td>
+              <td>{{{{ book.category }}}}</td>
+              <td><select :value="book.status" @change="setStatus(book, $event.target.value)"><option>在馆</option><option>借出</option><option>预约</option><option>维护</option></select></td>
+              <td><button class="text-button" @click="removeBook(book.id)">删除</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
 </template>
 """
 
 
 def generated_vue3_library_css() -> str:
-    return """:root{color-scheme:dark;font-family:Inter,'Microsoft YaHei',sans-serif}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#080d18;color:#edf3ff}.library-shell{width:min(1180px,calc(100vw - 32px));margin:0 auto;padding:32px 0}.hero,.stats article,.toolbar,.book-form,.book-card{border:1px solid #26365f;background:#101827;border-radius:8px}.hero{padding:30px}.hero span{color:#2fe098;font-weight:900}.hero h1{margin:8px 0 10px;font-size:clamp(30px,4vw,52px)}.hero p{margin:0;color:#9fb0cc}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0}.stats article{padding:18px}.stats strong{display:block;font-size:30px}.stats span,.book-card span{color:#9fb0cc}.toolbar,.book-form{display:grid;grid-template-columns:1fr 180px 180px;gap:10px;padding:12px;margin-bottom:12px}.book-form{grid-template-columns:1fr 180px 160px 140px 120px}input,select,button{height:42px;border:1px solid #2d3b67;border-radius:7px;background:#0d1428;color:#edf3ff;padding:0 12px}button{cursor:pointer;font-weight:800}.book-form button{background:#1097a7;border-color:#21d6e7}.book-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}.book-card{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:16px}.book-card strong,.book-card span{display:block}.book-card strong{margin-bottom:6px}.status-在馆{border-color:#2fe098;color:#2fe098}.status-借出{border-color:#ffc44d;color:#ffc44d}.status-预约{border-color:#21d6e7;color:#21d6e7}@media(max-width:820px){.stats,.toolbar,.book-form{grid-template-columns:1fr}.book-card{align-items:flex-start;flex-direction:column}.book-card button{width:100%}}"""
+    return """:root{font-family:'Segoe UI','Microsoft YaHei',Arial,sans-serif;color:#122033;background:#e6edf5}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#d8e5ef;color:#102033}button,input,select{font:inherit}.library-admin{display:grid;grid-template-columns:190px minmax(0,1fr);min-height:100vh}.library-sidebar{background:#07466d;color:#fff;border-right:1px solid #043654;padding:0}.system-title{height:52px;display:flex;align-items:center;padding:0 12px;background:#053858;font-size:14px;font-weight:700}.side-item{display:block;width:100%;height:42px;border:0;border-bottom:1px solid rgba(255,255,255,.16);background:#0b5b89;color:#eaf7ff;text-align:left;padding:0 14px;cursor:pointer}.side-item.active{background:#1684bd}.library-workbench{min-width:0;padding:18px 22px}.library-topbar{height:58px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;background:#0a4a72;color:#fff;border:1px solid #063a5b}.library-topbar h1{margin:0;font-size:24px}.library-topbar span{font-size:13px;color:#c9e9ff}.summary-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px 0}.summary-strip article{background:#fff;border:1px solid #aac1d1;padding:12px}.summary-strip strong{display:block;font-size:24px;color:#0a4a72}.summary-strip span{font-size:12px;color:#526575}.manage-panel{background:#fff;border:1px solid #9eb7c9;padding:12px;box-shadow:0 1px 2px rgba(16,32,51,.12)}.panel-title{font-weight:800;margin-bottom:10px;color:#14324a}.book-editor{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr)) 150px;gap:8px 14px;align-items:end;margin-bottom:12px}.book-editor label,.search-row label{display:grid;gap:4px;font-size:12px;color:#23384a}.book-editor input,.book-editor select,.search-row input,.search-row select,.book-table select{height:30px;border:1px solid #a7bbc9;background:#fff;color:#102033;padding:0 8px}.form-actions{display:flex;gap:8px}.form-actions button{height:32px;border:1px solid #7d9db4;background:#e7f0f7;color:#102033;padding:0 14px;cursor:pointer}.form-actions button:first-child{background:#d8edf9}.search-row{display:grid;grid-template-columns:minmax(220px,1fr) 180px 160px;gap:10px;margin:8px 0 12px;align-items:end}.book-table{width:100%;border-collapse:collapse;font-size:12px}.book-table th{background:#dbe7f0;color:#17324a;border:1px solid #9eb7c9;text-align:left;padding:7px}.book-table td{border:1px solid #b6c8d5;padding:6px;vertical-align:middle}.book-table tr:nth-child(even){background:#f4f8fb}.text-button{height:28px;border:1px solid #9eb7c9;background:#fff;color:#0a5d8f;cursor:pointer}@media(max-width:860px){.library-admin{grid-template-columns:1fr}.library-sidebar{display:none}.book-editor,.search-row,.summary-strip{grid-template-columns:1fr}.library-workbench{padding:12px}.book-table{display:block;overflow:auto;white-space:nowrap}}"""
 
 
 def generated_vue3_library_test_js(task_id: str) -> str:
@@ -2791,15 +3095,55 @@ import fs from "node:fs";
 const html = fs.readFileSync("index.html", "utf8");
 const main = fs.readFileSync("src/main.js", "utf8");
 const vue = fs.readFileSync("src/App.vue", "utf8");
+const css = fs.readFileSync("src/style.css", "utf8");
 
 assert.match(html, /id="app"/);
+assert.match(html, /type="module"/);
 assert.match(main, /createApp/);
-assert.match(main, /新增图书/);
-assert.match(main, /借出/);
-assert.match(vue, /v-model/);
+assert.match(main, /Manage Books/);
+assert.match(main, /book-table/);
+assert.match(main, /vue@3|createApp/);
+assert.ok(!main.includes("/api/tasks"), "frontend-only project must not depend on FastAPI task API");
+assert.match(vue, /图书管理系统/);
+assert.match(vue, /Accession No/);
+assert.match(vue, /removeBook/);
 assert.match(vue, /filteredBooks/);
+assert.match(css, /library-sidebar/);
 
-console.log("vue3 library frontend smoke ok: {task_id}");
+console.log("vue3 library admin smoke ok with compat gate: {task_id}");
+"""
+
+
+def generated_vue3_frontend_readme(task_id: str, title: str, spec: Dict[str, Any]) -> str:
+    return f"""# 图书管理系统
+
+这是 QuantumFlow 根据需求理解生成的 Vue3 图书管理前端项目。
+
+## 需求理解
+
+- 业务领域：图书馆 / 馆藏后台管理
+- 技术栈：Vue3
+- 语言策略：不限语言开发，但交付必须通过 Tester 跨语言兼容门禁
+- 开发范围：前端页面，不强行生成后端任务系统
+- 核心功能：后台菜单、图书录入、搜索、分类筛选、状态筛选、表格管理、状态修改和删除
+- 命名修正：页面名称固定为“图书管理系统”，不再把用户指令原文当作系统标题
+- 返工规则：如果 Tester 判定语言、运行时、接口契约或模块入口不兼容，退回对应 Agent 免费重构并返还本轮 token
+
+## Agent 分工
+
+- 前端 Agent：生成 `src/main.js`、`src/App.vue`、`src/style.css`
+- 测试 Agent：生成 `tests/book.spec.js`，检查后台管理布局、核心业务文案和跨语言兼容性
+- Reviewer：生成 `docs/review-checklist.md`
+
+## 运行
+
+```powershell
+npm install
+npm run dev
+```
+
+任务 ID：{task_id}
+原始任务：{title}
 """
 
 
@@ -2814,13 +3158,16 @@ def generated_vue3_frontend_review(task_id: str, title: str) -> str:
 - [x] 识别为图书管理系统，不是通用任务管理系统。
 - [x] 识别为前端任务，不强行生成后端 API。
 - [x] 识别 Vue3 技术栈，并提供 `src/App.vue` 与 `src/main.js`。
+- [x] 页面名称修正为“图书管理系统”，不再使用需求句子当标题。
+- [x] 支持不限语言开发，但必须通过 Tester 的跨语言兼容门禁。
 
 ## 必须通过
 
-- [x] 图书列表、搜索、分类筛选、状态筛选可用。
-- [x] 支持新增图书。
-- [x] 支持图书状态在“在馆 / 借出 / 预约”之间切换。
-- [x] 测试 Agent 提供 `tests/book.spec.js` 检查关键结构。
+- [x] 页面是后台管理系统布局：左侧菜单、顶部标题、管理表单、搜索区、表格区。
+- [x] 支持新增图书、搜索、分类筛选、状态筛选。
+- [x] 支持图书状态修改和删除。
+- [x] 测试 Agent 提供 `tests/book.spec.js` 检查关键结构、Vue3 入口、浏览器模块加载和前后端契约边界。
+- [x] 不兼容时退回原 Agent 免费重构，并在运行记录中返还本轮 token。
 """
 
 
@@ -2854,7 +3201,7 @@ def record_generated_code_for_task(task_id: str, agent_id: str | None = None, su
     task = runtime.tasks[task_id]
     owner_id = agent_id or task.owner_id
     agent = runtime.agents[owner_id]
-    target_key = target_key_for_agent(owner_id)
+    target_key = target_key_for_agent(owner_id, task.title)
     code_text = generated_code_text(f"{task_id}_{suffix}" if suffix else task_id, task.title, owner_id)
     validation = validate_generated_code(target_key, code_text)
     status = "validated" if validation["ok"] else "rejected"
@@ -2892,7 +3239,16 @@ def is_legacy_stub_artifact(artifact: Dict[str, Any]) -> bool:
     )
 
 
-def target_key_for_agent(agent_id: str) -> str:
+def target_key_for_agent(agent_id: str, title: str = "") -> str:
+    spec = analyze_business_spec(title, "") if title else {}
+    if spec.get("scope") == "frontend_only" and spec.get("framework") == "vue3":
+        return {
+            "master": "project/README.md",
+            "frontend": "project/src/App.vue",
+            "backend": "project/docs/api-assumption.md",
+            "reviewer": "project/docs/review-checklist.md",
+            "tester": "project/tests/book.spec.js",
+        }.get(agent_id, "runtime/server.py")
     return {
         "master": "project/README.md",
         "frontend": "project/app/static/app.js",
@@ -2954,6 +3310,21 @@ def analyze_business_spec(title: str, task_id: str) -> Dict[str, Any]:
 def generated_code_text(task_id: str, title: str, owner_id: str) -> str:
     safe_title = title.replace("\n", " ").strip() or "QuantumFlow Generated Project"
     spec = analyze_business_spec(safe_title, task_id)
+    if spec["scope"] == "frontend_only" and spec["framework"] == "vue3":
+        books = [
+            {"title": "人月神话", "author": "Frederick P. Brooks", "category": "软件工程", "status": "在馆"},
+            {"title": "代码大全", "author": "Steve McConnell", "category": "编程实践", "status": "借出"},
+            {"title": "深入理解计算机系统", "author": "Randal E. Bryant", "category": "计算机系统", "status": "预约"},
+        ]
+        if owner_id == "frontend":
+            return generated_vue3_library_app_vue(safe_title, books)
+        if owner_id == "backend":
+            return "# API 约束说明\n\n本次需求被识别为 Vue3 前端页面任务，Backend Agent 不强行生成后端服务。\n\n- GET /api/books：读取图书列表。\n- POST /api/books：新增图书。\n- PATCH /api/books/{id}：更新借阅状态。\n"
+        if owner_id == "tester":
+            return generated_vue3_library_test_js(task_id)
+        if owner_id == "reviewer":
+            return generated_vue3_frontend_review(task_id, safe_title)
+        return generated_vue3_frontend_readme(task_id, safe_title, spec)
     if owner_id == "frontend":
         return generated_frontend_app_js(task_id, safe_title, spec)
     if owner_id == "backend":
@@ -3242,6 +3613,16 @@ def test_health_and_task_flow():
         listed = client.get("/api/tasks")
         assert listed.status_code == 200
         assert any(item["id"] == task_id for item in listed.json())
+
+
+def test_cross_language_contract_compatibility():
+    with TestClient(app) as client:
+        health = client.get("/api/health").json()
+        tasks = client.get("/api/tasks").json()
+        assert isinstance(health["task_id"], str)
+        assert all(isinstance(item["id"], int) for item in tasks)
+        assert all(item["status"] in {{"pending", "active", "blocked", "done"}} for item in tasks)
+        assert client.get("/").headers["content-type"].startswith("text/html")
 '''
 
 
@@ -3258,6 +3639,8 @@ def generated_review_checklist(task_id: str, title: str, spec: Dict[str, Any] | 
 - [x] 后端 Agent 独立提供 `/api/health`、`/api/tasks`、`/api/tasks/{{id}}` 和 SQLite 存储。
 - [x] 前端 Agent 独立提供业务列表、搜索筛选、状态切换和接口联动。
 - [x] 测试 Agent 独立覆盖健康检查、初始业务数据、创建、更新和列表读取。
+- [x] 测试 Agent 额外检查跨语言接口契约、JSON 类型、状态枚举、编码和运行入口兼容。
+- [x] 不兼容时退回原负责 Agent 免费重构，重构 token 直接返还。
 - [x] 状态文案中文化，接口状态值保持英文以便程序处理。
 
 ## 交付说明
@@ -3278,6 +3661,7 @@ def generated_project_readme(task_id: str, title: str, spec: Dict[str, Any] | No
 - 后端 Agent：负责 FastAPI、SQLite、业务实体初始化和接口。
 - 测试 Agent：负责 `tests/test_smoke.py`，覆盖健康检查、初始数据、创建、更新和列表读取。
 - Reviewer：负责审查清单和合并门禁。
+- 兼容策略：不限语言开发，但必须通过 Tester 的跨语言兼容性门禁；不兼容时退回原 Agent 免费重构并返还 token。
 
 业务实体：{spec["entity_label"]}
 

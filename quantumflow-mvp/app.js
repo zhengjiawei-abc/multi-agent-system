@@ -213,6 +213,74 @@ const openWorldRepos = [
   },
 ];
 
+const CUSTOM_INTERNAL_REPOS_KEY = "qfCustomInternalRepos";
+
+function loadCustomInternalRepos() {
+  try {
+    const rows = JSON.parse(localStorage.getItem(CUSTOM_INTERNAL_REPOS_KEY) || "[]");
+    if (!Array.isArray(rows)) return;
+    rows
+      .filter((repo) => repo && repo.id && repo.name && repo.files)
+      .reverse()
+      .forEach((repo) => {
+        if (!openWorldRepos.some((item) => item.id === repo.id)) openWorldRepos.unshift({ ...repo, custom: true });
+      });
+  } catch {
+    // Local repo cache is optional.
+  }
+}
+
+function saveCustomInternalRepos() {
+  const customRepos = openWorldRepos.filter((repo) => repo.custom);
+  localStorage.setItem(CUSTOM_INTERNAL_REPOS_KEY, JSON.stringify(customRepos));
+}
+
+function normalizeInternalRepo(repo) {
+  const files = {};
+  Object.entries(repo.files || {}).forEach(([fileName, lines]) => {
+    files[fileName] = Array.isArray(lines) ? lines.map((line) => String(line)) : String(lines || "").split("\n");
+  });
+  return {
+    id: String(repo.id || repo.name || `repo-${Date.now().toString(36)}`),
+    name: String(repo.name || repo.id || "workspace-repo"),
+    desc: String(repo.desc || repo.path || "Workspace repository"),
+    lang: String(repo.lang || "Code"),
+    stars: Number(repo.stars || 0),
+    workspace: Boolean(repo.workspace),
+    custom: Boolean(repo.custom),
+    path: repo.path || "",
+    files,
+  };
+}
+
+function replaceWorkspaceRepos(repos = []) {
+  const workspaceRepos = repos.map(normalizeInternalRepo).filter((repo) => Object.keys(repo.files).length);
+  if (!workspaceRepos.length) return;
+  const customRepos = openWorldRepos.filter((repo) => repo.custom);
+  const customIds = new Set(customRepos.map((repo) => repo.id));
+  const nextRepos = [...workspaceRepos.filter((repo) => !customIds.has(repo.id)), ...customRepos];
+  openWorldRepos.splice(0, openWorldRepos.length, ...nextRepos);
+  if (!openWorldRepos.some((repo) => repo.id === activeRepoId)) {
+    activeRepoId = openWorldRepos[0]?.id || "";
+    activeFileName = Object.keys(openWorldRepos[0]?.files || {})[0] || "";
+  }
+}
+
+async function loadWorkspaceInternalRepos() {
+  if (location.protocol === "file:") return;
+  try {
+    const response = await fetch(`/api/internal-repos?t=${Date.now()}`);
+    if (!response.ok) throw new Error(`internal repos HTTP ${response.status}`);
+    const repos = await response.json();
+    replaceWorkspaceRepos(Array.isArray(repos) ? repos : []);
+    renderCommunity();
+  } catch {
+    // Keep built-in/demo repos when the backend is not available.
+  }
+}
+
+loadCustomInternalRepos();
+
 const people = [
   ["You", "Founder", "#21d6e7"],
   ["Master Agent", "Maintainer", "#ffc44d"],
@@ -225,11 +293,18 @@ const people = [
 
 let activeRepoId = "runtime";
 let activeFileName = "server.py";
+let repoInlineQuery = "";
 const generatedCodeOverrides = {};
 const streamingCodeTimers = new Map();
+const streamingCodeQueue = [];
+let streamingCodeActive = false;
 let streamingCodeKey = "";
 let streamingCodeLineIndex = -1;
 let activePatchCandidate = null;
+let currentView = "warRoom";
+let pendingAuthView = "";
+let pendingMasterHandoff = null;
+let selectedReviewerIntakeKey = "";
 const patchTargetMap = {
   "runtime/server.py": "runtime/server.py",
   "runtime/Agent.py": "runtime/Agent.py",
@@ -257,8 +332,12 @@ let liveComments = [
 let externalIssues = [];
 const manualIssues = [];
 let codedTaskKeys = new Set();
+let deliveredTaskKeys = new Set();
+let queuedCodeStreamKeys = new Set();
+let completedCodeStreamKeys = new Set();
 let codeArtifactKeys = new Set();
 const codeArtifactMeta = {};
+const agentTokenRefunds = {};
 
 let currentTaskIndex = -1;
 let paused = false;
@@ -271,6 +350,7 @@ let arbitrationTimer = null;
 let backendQueueStats = { pending: 0, active: 0, blocked: 0, running_total: 0, completed_total: 0 };
 let suppressNonEmptyTaskSnapshotUntil = 0;
 let localWorkflowTaskSeq = 1;
+let masterTaskHistory = [];
 let projectDeliveries = [];
 let activeRuntimeDeliveryId = localStorage.getItem("qfActiveRuntimeDeliveryId") || "";
 const deliveryTestStates = {};
@@ -541,8 +621,16 @@ const els = {
   issueDescribeBtn: document.getElementById("issueDescribeBtn"),
   issueDescriptionInput: document.getElementById("issueDescriptionInput"),
   repoList: document.getElementById("repoList"),
+  repoQuickCreateBtn: document.getElementById("repoQuickCreateBtn"),
   repoWindowList: document.getElementById("repoWindowList"),
   repoInlineList: document.getElementById("repoInlineList"),
+  repoInlineSearch: document.getElementById("repoInlineSearch"),
+  repoDetailPanel: document.getElementById("repoDetailPanel"),
+  repoCreateToggleBtn: document.getElementById("repoCreateToggleBtn"),
+  repoCreateForm: document.getElementById("repoCreateForm"),
+  repoCreateName: document.getElementById("repoCreateName"),
+  repoCreateDesc: document.getElementById("repoCreateDesc"),
+  repoCreateLang: document.getElementById("repoCreateLang"),
   gitSyncForm: document.getElementById("gitSyncForm"),
   gitSyncUrl: document.getElementById("gitSyncUrl"),
   gitSyncName: document.getElementById("gitSyncName"),
@@ -557,6 +645,7 @@ const els = {
   autoCodeInput: document.getElementById("autoCodeInput"),
   autoCodeOwner: document.getElementById("autoCodeOwner"),
   agentArbitrationNote: document.getElementById("agentArbitrationNote"),
+  autoAgentMonitor: document.getElementById("autoAgentMonitor"),
   adoptSuggestionBtn: document.getElementById("adoptSuggestionBtn"),
   patchPreviewPanel: document.getElementById("patchPreviewPanel"),
   captainVoteList: document.getElementById("captainVoteList"),
@@ -656,6 +745,7 @@ const els = {
   registerPanel: document.getElementById("registerPanel"),
   forgotPanel: document.getElementById("forgotPanel"),
   loginForm: document.getElementById("loginForm"),
+  loginSubmitBtn: document.getElementById("loginSubmitBtn"),
   loginAccount: document.getElementById("loginAccount"),
   loginPassword: document.getElementById("loginPassword"),
   rememberAccount: document.getElementById("rememberAccount"),
@@ -673,7 +763,10 @@ const els = {
   forgotPassword: document.getElementById("forgotPassword"),
   sendForgotCodeBtn: document.getElementById("sendForgotCodeBtn"),
   profileForm: document.getElementById("profileForm"),
-  profileDisplayName: document.getElementById("profileDisplayName"),
+  profileUsername: document.getElementById("profileUsername"),
+  profileEmail: document.getElementById("profileEmail"),
+  profilePhone: document.getElementById("profilePhone"),
+  profileEditBtn: document.getElementById("profileEditBtn"),
   profileSaveState: document.getElementById("profileSaveState"),
   profileAvatar: document.getElementById("profileAvatar"),
   profileName: document.getElementById("profileName"),
@@ -681,6 +774,7 @@ const els = {
   profileFacts: document.getElementById("profileFacts"),
   profileSideMetrics: document.getElementById("profileSideMetrics"),
   profileOverviewGrid: document.getElementById("profileOverviewGrid"),
+  profileAgentRuntimeList: document.getElementById("profileAgentRuntimeList"),
   profileRoomList: document.getElementById("profileRoomList"),
   profileActivityList: document.getElementById("profileActivityList"),
   profileRepoList: document.getElementById("profileRepoList"),
@@ -710,6 +804,12 @@ function setAuthStatus(message, tone = "") {
   els.authStatus.dataset.tone = tone;
 }
 
+function syncLoginSystemName() {
+  if (!els.loginSubmitBtn) return;
+  const systemName = String(els.pageTitle?.textContent || "QuantumFlow 调度中枢").trim();
+  els.loginSubmitBtn.textContent = `进入 ${systemName}`;
+}
+
 function showAuthView(view = "login", push = true) {
   const panels = {
     login: els.loginPanel,
@@ -733,14 +833,14 @@ function hideAuthShell() {
   document.body.classList.remove("auth-mode");
   if (isAuthRoute()) {
     if (location.protocol !== "file:") history.replaceState(null, "", "/war-room");
-    switchView("warRoom");
   }
 }
 
 function enterDefaultAfterAuth() {
-  if (location.protocol !== "file:") history.replaceState(null, "", "/war-room");
+  const targetView = pendingAuthView || currentView || "warRoom";
+  pendingAuthView = "";
   hideAuthShell();
-  switchView("warRoom");
+  switchView(targetView);
 }
 
 function isAuthRoute(pathname = location.pathname) {
@@ -749,8 +849,19 @@ function isAuthRoute(pathname = location.pathname) {
 
 function enforceLoginGate() {
   if (currentUser) return false;
+  pendingAuthView = viewFromPath() || currentView || "warRoom";
   showAuthView(location.pathname.includes("register") ? "register" : location.pathname.includes("forgot-password") ? "forgot" : "login", false);
   return true;
+}
+
+function viewFromPath(pathname = location.pathname) {
+  if (pathname.includes("runtime-environment")) return "runtimeEnvironment";
+  if (pathname.includes("admin")) return "developerAdmin";
+  if (pathname.includes("open-source")) return "openSourceWorld";
+  if (pathname.includes("platform")) return "community";
+  if (pathname.includes("profile")) return "profile";
+  if (pathname.includes("project-room")) return "projectRoom";
+  return "warRoom";
 }
 
 function todayKey() {
@@ -840,6 +951,17 @@ function updateAuthChrome() {
   }
 }
 
+function isFounderUser(user = currentUser) {
+  const role = String(user?.role || "").trim().toLowerCase();
+  const title = String(user?.title || "").trim().toLowerCase();
+  return Boolean(user?.founder) || role === "founder" || title === "创始人" || title === "founder";
+}
+
+function displayRoleLabel(role, user = currentUser) {
+  if (isFounderUser(user)) return "创始人";
+  return role || "Developer";
+}
+
 function renderProfile() {
   if (!currentUser) {
     setAuthStatus("请先登录后查看用户页。", "warn");
@@ -847,12 +969,20 @@ function renderProfile() {
     return;
   }
   const name = currentUser.display_name || currentUser.username || "Developer";
-  const syncedRole = currentUser.role || onlineRoleForName(name) || "Developer";
+  const founder = isFounderUser(currentUser);
+  const rawRole = currentUser.role || onlineRoleForName(name) || "Developer";
+  const syncedRole = displayRoleLabel(rawRole, currentUser);
   const syncedStatus = isNameOnline(name) ? "online" : currentUser.status || "active";
-  if (els.profileAvatar) els.profileAvatar.textContent = name.slice(0, 2).toUpperCase();
+  if (els.profileAvatar) els.profileAvatar.textContent = avatarInitial(name);
   if (els.profileName) els.profileName.textContent = name;
-  if (els.profileMeta) els.profileMeta.textContent = `${syncedRole} / ${syncedStatus}`;
-  if (els.profileDisplayName) els.profileDisplayName.value = currentUser.display_name || "";
+  if (els.profileMeta) els.profileMeta.innerHTML = `${escapeHtml(syncedRole)} / ${escapeHtml(syncedStatus)}${founder ? '<b class="founder-title-badge">Founder</b>' : ""}`;
+  if (els.profileUsername) els.profileUsername.value = currentUser.username || "";
+  if (els.profileUsername) {
+    els.profileUsername.disabled = false;
+    els.profileUsername.title = "只能修改当前登录账号的用户名。";
+  }
+  if (els.profileEmail) els.profileEmail.value = currentUser.email || "";
+  if (els.profilePhone) els.profilePhone.value = currentUser.phone || "";
   const roomCount = myProjectRooms.length;
   const commentCount = liveComments.filter((item) => isOwnMessageName(item.name)).length;
   const publicCount = publicChatMessages.filter((item) => isOwnMessageName(item.name)).length;
@@ -868,8 +998,14 @@ function renderProfile() {
       <article><span>状态</span><strong>${escapeHtml(syncedStatus)}</strong><em>实时在线状态</em></article>
       <article><span>项目</span><strong>${roomCount}</strong><em>已加入房间</em></article>
       <article><span>消息</span><strong>${commentCount + publicCount}</strong><em>本地协作记录</em></article>
+      ${
+        founder
+          ? `<article class="founder-privilege-card"><span>Founder Privilege</span><strong>系统创始人</strong><em>永久全权限 / 不可降级 / 最终 Owner 门禁</em></article>`
+          : ""
+      }
     `;
   }
+  renderProfileAgentRuntime();
   if (els.profileFacts) {
     els.profileFacts.innerHTML = `
       <div><span>用户 ID</span><strong>${escapeHtml(currentUser.id || "-")}</strong></div>
@@ -878,6 +1014,8 @@ function renderProfile() {
       <div><span>邮箱</span><strong>${escapeHtml(currentUser.email || "未绑定")}</strong></div>
       <div><span>手机</span><strong>${escapeHtml(currentUser.phone || "未绑定")}</strong></div>
       <div><span>账号角色</span><strong>${escapeHtml(syncedRole)}</strong></div>
+      ${founder ? '<div><span>专属头衔</span><strong>创始人 Founder</strong></div>' : ""}
+      ${founder ? '<div><span>Founder 特权</span><strong>全权限、成员管理、接口注册、系统 Owner 覆盖权</strong></div>' : ""}
       <div><span>实时状态</span><strong>${escapeHtml(syncedStatus)}</strong></div>
       <div><span>创建时间</span><strong>${escapeHtml(currentUser.created_at || "-")}</strong></div>
       <div><span>最近登录</span><strong>${escapeHtml(currentUser.last_login_at || "刚刚")}</strong></div>
@@ -938,8 +1076,86 @@ function renderProfile() {
   }
 }
 
+function renderProfileAgentRuntime() {
+  if (!els.profileAgentRuntimeList) return;
+  const rows = agents.map((agent) => {
+    const ownedTasks = tasks.filter((task) => task.owner === agent.id && !["done", "delivery", "packaged", "delivered"].includes(task.status));
+    const current = ownedTasks.find((task) => ["active", "blocked", "review"].includes(task.status)) || ownedTasks[0];
+    const blocked = ownedTasks.filter((task) => task.status === "blocked").length;
+    const token = estimateAgentTokenUsage(agent.id);
+    return { agent, ownedTasks, current, blocked, token };
+  });
+  const totalToken = rows.reduce((sum, row) => sum + row.token.total, 0);
+  els.profileAgentRuntimeList.innerHTML = `
+    <div class="profile-agent-runtime-summary">
+      <div><span>总任务量</span><strong>${rows.reduce((sum, row) => sum + row.ownedTasks.length, 0)}</strong></div>
+      <div><span>阻塞</span><strong>${rows.reduce((sum, row) => sum + row.blocked, 0)}</strong></div>
+      <div><span>Token 总量</span><strong>${formatTokenCount(totalToken)}</strong></div>
+    </div>
+    <div class="profile-agent-table">
+      ${rows
+        .map(({ agent, ownedTasks, current, blocked, token }) => {
+          const busy = isAgentBusy(agent.id);
+          return `
+            <article class="${busy ? "busy" : "free"}">
+              <div class="profile-agent-name">
+                <i style="--agent-color:${escapeHtml(agent.color)}"></i>
+                <span><strong>${escapeHtml(agent.name)}</strong><em>${escapeHtml(agent.role)}</em></span>
+              </div>
+              <div><span>状态</span><strong>${escapeHtml(statusLabel(agent.status))}</strong></div>
+              <div><span>任务</span><strong>${ownedTasks.length}</strong><em>${blocked ? `${blocked} 阻塞` : "无阻塞"}</em></div>
+              <div class="profile-agent-current"><span>当前任务</span><strong>${escapeHtml(current?.workflowTitle || current?.title || "暂无")}</strong></div>
+              <div><span>Prompt</span><strong>${formatTokenCount(token.prompt)}</strong></div>
+              <div><span>Completion</span><strong>${formatTokenCount(token.completion)}</strong></div>
+              <div><span>Total</span><strong>${formatTokenCount(token.total)}</strong><em>${token.refund ? `已返还 ${formatTokenCount(token.refund)}` : "估算"}</em></div>
+            </article>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function estimateAgentTokenUsage(agentId) {
+  const ownedTasks = tasks.filter((task) => task.owner === agentId && !["delivery", "packaged", "delivered"].includes(task.status));
+  const taskText = ownedTasks.map((task) => `${task.title || ""} ${task.workflowTitle || ""} ${task.source || ""}`).join("\n");
+  const artifactChars = Object.values(codeArtifactMeta)
+    .filter((artifact) => String(artifact.agent_id || "") === agentId)
+    .reduce((sum, artifact) => sum + String(artifact.code_text || "").length + String(artifact.explanation || "").length, 0);
+  const streamedChars = Object.entries(generatedCodeOverrides)
+    .filter(([key]) => keyBelongsToAgent(key, agentId))
+    .reduce((sum, [, lines]) => sum + (Array.isArray(lines) ? lines.join("\n").length : 0), 0);
+  const commentChars = liveComments
+    .filter((item) => String(item.name || "").toLowerCase().includes(String(agentId).toLowerCase()) || String(item.name || "").includes(agentById(agentId)?.name || ""))
+    .reduce((sum, item) => sum + String(item.text || "").length, 0);
+  const prompt = Math.ceil((taskText.length + commentChars + ownedTasks.length * 420) / 3.6);
+  const completion = Math.ceil((artifactChars + streamedChars) / 3.8);
+  const gross = prompt + completion;
+  const refund = Math.min(gross, Math.max(0, Math.round(agentTokenRefunds[agentId] || 0)));
+  return { prompt, completion, refund, total: Math.max(0, gross - refund), gross };
+}
+
+function keyBelongsToAgent(key, agentId) {
+  const fileName = String(key || "").split("/").slice(1).join("/");
+  const map = {
+    master: ["README.md", "Agent.py"],
+    frontend: ["src/App.vue", "src/main.js", "src/style.css", "app/static/app.js", "index.html", "package.json"],
+    backend: ["app/main.py", "server.py", "api-assumption.md"],
+    tester: ["tests/book.spec.js", "tests/test_smoke.py", "feishu.md"],
+    reviewer: ["docs/review-checklist.md", "connectors.py"],
+  };
+  return (map[agentId] || []).some((item) => fileName.endsWith(item));
+}
+
+function formatTokenCount(value) {
+  const number = Math.max(0, Math.round(Number(value) || 0));
+  if (number >= 1000000) return `${(number / 1000000).toFixed(1)}M`;
+  if (number >= 1000) return `${(number / 1000).toFixed(1)}K`;
+  return String(number);
+}
+
 function switchProfileTab(tab = "overview") {
-  const next = ["overview", "repositories", "projects", "activity"].includes(tab) ? tab : "overview";
+  const next = ["overview", "repositories", "projects", "activity", "personal"].includes(tab) ? tab : "overview";
   document.querySelectorAll("[data-profile-tab]").forEach((button) => {
     button.classList.toggle("active", button.dataset.profileTab === next);
   });
@@ -1046,9 +1262,27 @@ async function submitForgotPassword(event) {
 async function submitProfile(event) {
   event.preventDefault();
   if (!currentUser) return;
-  const displayName = els.profileDisplayName?.value.trim() || currentUser.username || "Developer";
+  const username = els.profileUsername?.value.trim() || currentUser.username || "";
+  const email = els.profileEmail?.value.trim() || "";
+  const phone = els.profilePhone?.value.trim() || "";
+  const validationError =
+    !/^[a-zA-Z0-9_.-]{3,32}$/.test(username)
+      ? "用户名只能包含字母、数字、下划线、点或短横线，长度 3-32 位。"
+      : email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+        ? "邮箱格式不正确。"
+        : phone && !/^\+?\d[\d\s-]{5,20}$/.test(phone)
+          ? "手机号格式不正确。"
+          : "";
+  if (validationError) {
+    if (els.profileSaveState) {
+      els.profileSaveState.textContent = validationError;
+      els.profileSaveState.dataset.tone = "warn";
+    }
+    setAuthStatus(validationError, "warn");
+    return;
+  }
   const previousUser = { ...currentUser };
-  currentUser = { ...currentUser, display_name: displayName };
+  currentUser = { ...currentUser, username, email, phone };
   storeAuthSession(authToken, currentUser);
   updateAuthChrome();
   renderProfile();
@@ -1060,7 +1294,7 @@ async function submitProfile(event) {
     const response = await fetch("/api/auth/profile", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ display_name: displayName }),
+      body: JSON.stringify({ username, email, phone }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || "保存失败");
@@ -1073,16 +1307,26 @@ async function submitProfile(event) {
       els.profileSaveState.dataset.tone = "ok";
     }
   } catch (error) {
-    currentUser = { ...previousUser, display_name: displayName };
+    currentUser = previousUser;
     storeAuthSession(authToken, currentUser);
     renderProfile();
     updateAuthChrome();
-    setAuthStatus(error.message || "同步失败，本地资料已更新。", "warn");
+    const message = error.message || "同步失败，请稍后重试。";
+    setAuthStatus(`资料未同步：${message}`, "warn");
     if (els.profileSaveState) {
-      els.profileSaveState.textContent = "后端同步失败，本地已更新";
+      els.profileSaveState.textContent = `未同步：${message}`;
       els.profileSaveState.dataset.tone = "warn";
     }
   }
+}
+
+function openProfileEditor() {
+  if (!currentUser) {
+    showAuthView("login", false);
+    return;
+  }
+  switchProfileTab("personal");
+  window.setTimeout(() => els.profileUsername?.focus(), 0);
 }
 
 async function logout() {
@@ -1150,16 +1394,18 @@ function agentMarkup(agent) {
   return `
     <div class="${classes}" data-agent="${agent.id}" style="--x:${agent.x}px;--y:${agent.y}px">
       <div class="agent-label">${agent.name}<b>${statusLabel(agent.status)}</b></div>
-      ${agent.crown ? '<div class="crown"></div>' : ""}
-      <div class="hair"></div>
-      <div class="head"></div>
-      <div class="eye-left"></div>
-      <div class="eye-right"></div>
-      <div class="body" style="background:${agent.color}"></div>
-      <div class="arm-left"></div>
-      <div class="arm-right"></div>
-      <div class="leg-left"></div>
-      <div class="leg-right"></div>
+      <div class="agent-avatar" style="--agent-color:${escapeHtml(agent.color)}">
+        ${agent.crown ? '<div class="agent-crown"></div>' : ""}
+        <div class="agent-hair"></div>
+        <div class="agent-head"></div>
+        <div class="agent-eye agent-eye-left"></div>
+        <div class="agent-eye agent-eye-right"></div>
+        <div class="agent-body"></div>
+        <div class="agent-arm agent-arm-left"></div>
+        <div class="agent-arm agent-arm-right"></div>
+        <div class="agent-leg agent-leg-left"></div>
+        <div class="agent-leg agent-leg-right"></div>
+      </div>
     </div>
   `;
 }
@@ -1211,11 +1457,13 @@ function openAgentQuickPanel(agent) {
       openMasterDeliveryPanel(agent, deliveryTask);
       return;
     }
+    openMasterHistoryPanel(agent);
+    return;
   }
   if (["frontend", "backend", "tester"].includes(agent.id)) {
-    const assignedTask = tasks.find((item) => item.owner === agent.id && item.status === "assigned");
-    if (assignedTask) {
-      openWorkerAcceptPanel(agent, assignedTask);
+    const acceptTask = tasks.find((item) => item.owner === agent.id && ["assigned", "pending"].includes(item.status));
+    if (acceptTask) {
+      openWorkerAcceptPanel(agent, acceptTask);
       return;
     }
   }
@@ -1244,6 +1492,7 @@ function openAgentQuickPanel(agent) {
   els.agentQuickExplain.innerHTML = `
     <strong>当前任务</strong>
     <p>${escapeHtml(task ? task.title : "暂无任务，等待调度。")}</p>
+    ${renderWorkerAcceptSummary(agent, task)}
     <strong>速览模式</strong>
     <p>这里可以直接看这个 Agent 正在写什么、每行代码的意图，以及它和当前业务流的关系。</p>
     <strong>继续深入</strong>
@@ -1253,6 +1502,36 @@ function openAgentQuickPanel(agent) {
   els.agentQuickPanel.setAttribute("aria-hidden", "false");
 }
 
+function renderWorkerAcceptSummary(agent, task) {
+  if (!["frontend", "backend", "tester"].includes(agent.id)) return "";
+  if (!task) {
+    return `
+      <div class="agent-accept-summary idle">
+        <strong>接受任务</strong>
+        <p>当前没有需要 ${escapeHtml(agent.name)} 处理的任务。</p>
+        <button type="button" disabled>等待任务</button>
+      </div>
+    `;
+  }
+  const taskKey = escapeHtml(task.localWorkflowId || task.id);
+  if (["assigned", "pending"].includes(task.status)) {
+    return `
+      <div class="agent-accept-summary">
+        <strong>接受任务</strong>
+        <p>任务已到达 ${escapeHtml(agent.name)}，接受后开始执行。</p>
+        <button type="button" data-worker-accept-task="${taskKey}">接受任务</button>
+      </div>
+    `;
+  }
+  return `
+    <div class="agent-accept-summary accepted">
+      <strong>接受任务</strong>
+      <p>任务已接受，当前状态：${escapeHtml(statusLabel(task.status))}。</p>
+      <button type="button" disabled>已接受</button>
+    </div>
+  `;
+}
+
 function positionAgentQuickPanel(agent, width = 520, height = 360) {
   const x = Math.max(18, Math.min(agent.x + 72, 1280 - width));
   const y = Math.max(18, Math.min(agent.y - 86, 600 - height));
@@ -1260,8 +1539,50 @@ function positionAgentQuickPanel(agent, width = 520, height = 360) {
   els.agentQuickPanel.style.setProperty("--quick-y", `${y}px`);
 }
 
+function recordMasterTaskHistory(type, title, detail = "") {
+  masterTaskHistory.unshift({
+    id: `mh-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`,
+    type,
+    title,
+    detail,
+    time: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
+  });
+  masterTaskHistory = masterTaskHistory.slice(0, 12);
+}
+
+function openMasterHistoryPanel(agent) {
+  positionAgentQuickPanel(agent, 560, 370);
+  const rows = masterTaskHistory.length
+    ? masterTaskHistory
+        .map(
+          (item) => `
+        <article class="master-history-item">
+          <span>${escapeHtml(item.time)} / ${escapeHtml(item.type)}</span>
+          <strong>${escapeHtml(item.title)}</strong>
+          <p>${escapeHtml(item.detail || "已记录。")}</p>
+        </article>
+      `,
+        )
+        .join("")
+    : '<div class="reviewer-task-empty">暂无过往任务记录；团队负责人接收、转交、交付后会自动记录在这里。</div>';
+  els.agentQuickKicker.textContent = `${agent.role} / 任务记录`;
+  els.agentQuickTitle.textContent = "团队负责人的任务记录台";
+  els.agentQuickCode.innerHTML = `<div class="master-history-list">${rows}</div>`;
+  els.agentQuickExplain.innerHTML = `
+    <strong>当前任务</strong>
+    <p>${escapeHtml(tasks.find((item) => item.owner === "master")?.title || "暂无团队负责人待处理任务。")}</p>
+    <strong>记录范围</strong>
+    <p>这里显示团队负责人接收任务、转交代码负责人、收到交付包和最终交付的过往记录。</p>
+  `;
+  els.agentQuickEditorBtn.textContent = "打开代码区";
+  els.agentQuickPanel.classList.add("active", "master-history-mode");
+  els.agentQuickPanel.setAttribute("aria-hidden", "false");
+}
+
 function openReviewerDispatchPanel(agent) {
-  const candidates = tasks.filter((item) => ["pending", "blocked", "active", "review"].includes(item.status));
+  const intakeTasks = tasks.filter((item) => item.owner === "reviewer" && item.reviewerIntake && item.status === "pending");
+  const reviewTasks = tasks.filter((item) => item.status === "review");
+  const candidates = [...intakeTasks, ...reviewTasks];
   const panelWidth = 600;
   const panelHeight = 390;
   const x = Math.max(18, Math.min(agent.x - 500, 1280 - panelWidth));
@@ -1269,41 +1590,42 @@ function openReviewerDispatchPanel(agent) {
 
   els.agentQuickPanel.style.setProperty("--quick-x", `${x}px`);
   els.agentQuickPanel.style.setProperty("--quick-y", `${y}px`);
-  els.agentQuickKicker.textContent = `${agent.role} / 接收与分配`;
-  els.agentQuickTitle.textContent = "代码审查者的任务分配台";
+  els.agentQuickKicker.textContent = `${agent.role} / 接收与启动`;
+  els.agentQuickTitle.textContent = "代码审查者的任务启动台";
   els.agentQuickCode.innerHTML = `
     <div class="reviewer-dispatch-list">
-      <div class="reviewer-dispatch-head"><span>待处理任务</span><strong>${candidates.length}</strong></div>
+      <div class="reviewer-dispatch-head"><span>待接收 / 待审核</span><strong>${candidates.length}</strong></div>
       ${
         candidates.length
           ? candidates
               .slice(0, 6)
               .map(
                 (task) => `
-        <button type="button" class="reviewer-task-choice" data-reviewer-task="${escapeHtml(task.title)}">
+        <button type="button" class="reviewer-task-choice" data-reviewer-task="${escapeHtml(task.localWorkflowId || task.id)}">
           <strong>${escapeHtml(task.title)}</strong>
-          <span>${escapeHtml(agentById(task.owner)?.name || task.owner)} / ${escapeHtml(statusLabel(task.status) || task.status)}</span>
+          <span>${escapeHtml(task.reviewerIntake ? directedOwnersText(task.suggestedOwners) : agentById(task.owner)?.name || task.owner)} / ${escapeHtml(statusLabel(task.status) || task.status)}</span>
         </button>
       `,
               )
               .join("")
-          : '<div class="reviewer-task-empty">暂无待处理任务，可以在右侧输入新任务后分配。</div>'
+          : '<div class="reviewer-task-empty">暂无团队负责人转交的任务。</div>'
       }
     </div>
   `;
+  const selectedIntake =
+    intakeTasks.find((task) => String(task.localWorkflowId || task.id) === String(selectedReviewerIntakeKey)) ||
+    intakeTasks[0];
   els.agentQuickExplain.innerHTML = `
     <form class="reviewer-dispatch-form" id="reviewerDispatchForm">
       <strong>接收任务</strong>
-      <textarea id="reviewerDispatchInput" placeholder="输入要分配的任务，或点击左侧待处理任务带入..."></textarea>
-      <strong>分配给</strong>
-      <div class="reviewer-dispatch-targets">
-        <button type="button" data-reviewer-owner-toggle="frontend" aria-pressed="true"><b>前端</b><span>页面、交互、样式</span></button>
-        <button type="button" data-reviewer-owner-toggle="backend" aria-pressed="true"><b>后端</b><span>接口、数据库、服务</span></button>
-        <button type="button" data-reviewer-owner-toggle="tester" aria-pressed="true"><b>测试</b><span>验收、冒烟、回归</span></button>
+      <div class="reviewer-directed-card">
+        <span>${escapeHtml(selectedIntake ? "团队负责人已定向" : "等待团队负责人")}</span>
+        <strong>${escapeHtml(selectedIntake?.title || "暂无待接收任务")}</strong>
+        <p>${escapeHtml(selectedIntake ? `执行 Agent：${directedOwnersText(selectedIntake.suggestedOwners)}` : "代码负责人只接收任务；执行对象由团队负责人定向传入。")}</p>
       </div>
-      <button class="reviewer-dispatch-submit" type="button" data-reviewer-dispatch-submit>分配给已选 Agent</button>
+      <button class="reviewer-dispatch-submit" type="button" data-reviewer-dispatch-submit="${escapeHtml(selectedIntake?.localWorkflowId || selectedIntake?.id || "")}" ${selectedIntake ? "" : "disabled"}>接收任务并启动定向 Agent</button>
       <button class="reviewer-review-submit" type="button" data-reviewer-review-submit>审核通过并打包给团队负责人</button>
-      <p class="reviewer-dispatch-note" id="reviewerDispatchNote">Reviewer 可以多选 Agent；任务会先进入“待接受”，接受后才执行。</p>
+      <p class="reviewer-dispatch-note" id="reviewerDispatchNote">按团队负责人当前选择的 Agent 启动；需要调整时可退回团队负责人重新选择。</p>
     </form>
   `;
   els.agentQuickEditorBtn.textContent = "打开代码区";
@@ -1317,7 +1639,7 @@ function openWorkerAcceptPanel(agent, task) {
   els.agentQuickTitle.textContent = `${agent.name} 的任务接收台`;
   els.agentQuickCode.innerHTML = `
     <div class="worker-accept-card">
-      <span>Reviewer 分配</span>
+      <span>Reviewer 启动</span>
       <strong>${escapeHtml(task.title)}</strong>
       <p>${escapeHtml(agent.name)} 需要先接受任务，接受后才进入执行状态。</p>
     </div>
@@ -1361,6 +1683,7 @@ function closeAgentQuickPanel() {
   els.agentQuickPanel?.classList.remove("active");
   els.agentQuickPanel?.classList.remove("reviewer-dispatch-mode");
   els.agentQuickPanel?.classList.remove("worker-accept-mode");
+  els.agentQuickPanel?.classList.remove("master-history-mode");
   els.agentQuickPanel?.setAttribute("aria-hidden", "true");
   if (els.agentQuickEditorBtn) els.agentQuickEditorBtn.textContent = "进入完整编辑器";
 }
@@ -1373,6 +1696,41 @@ function openSelectedAgentEditor() {
 
 function selectedReviewerOwners() {
   return [...document.querySelectorAll("[data-reviewer-owner-toggle][aria-pressed='true']")].map((button) => button.dataset.reviewerOwnerToggle);
+}
+
+function directedOwnersText(ownerIds = []) {
+  const names = ownerIds.map((id) => agentById(id)?.name || id).filter(Boolean);
+  return names.length ? names.join("、") : "暂无定向 Agent";
+}
+
+function coreOwnersLabel(ownerIds = []) {
+  const normalized = ownerIds.filter((id) => ["frontend", "backend", "tester"].includes(id));
+  if (normalized.length === 3) return "默认全流程";
+  return `定向 ${directedOwnersText(normalized)}`;
+}
+
+function codeTargetForAgent(agentId, title = "") {
+  const spec = inferBusinessSpec(title || "");
+  const vueTargets = {
+    frontend: ["project", "src/App.vue"],
+    backend: ["project", "docs/api-assumption.md"],
+    tester: ["project", "tests/book.spec.js"],
+    reviewer: ["project", "docs/review-checklist.md"],
+  };
+  const appTargets = {
+    frontend: ["project", "app/static/app.js"],
+    backend: ["project", "app/main.py"],
+    tester: ["project", "tests/test_smoke.py"],
+    reviewer: ["project", "docs/review-checklist.md"],
+  };
+  return (isVue3FrontendSpec(spec) ? vueTargets : appTargets)[agentId] || appTargets.frontend;
+}
+
+function focusAgentCodeTarget(agentId, title = "") {
+  const [repoId, fileName] = codeTargetForAgent(agentId, title);
+  activeRepoId = repoId;
+  activeFileName = fileName;
+  renderCommunity();
 }
 
 function stationForOwner(ownerId) {
@@ -1408,29 +1766,30 @@ function createReviewerAssignedTasks(title, ownerIds) {
   renderAll();
 }
 
-function dispatchReviewerTask(ownerId = "") {
-  const input = document.getElementById("reviewerDispatchInput");
+function dispatchReviewerTask(taskKey = "") {
   const note = document.getElementById("reviewerDispatchNote");
-  const title = input?.value.trim() || "";
-  if (!title) {
-    if (note) note.textContent = "先输入任务内容，或点击左侧待处理任务。";
-    input?.focus();
+  const intakeTask =
+    findWorkflowTask(taskKey) ||
+    tasks.find((task) => task.owner === "reviewer" && task.reviewerIntake && task.status === "pending");
+  if (!intakeTask) {
+    if (note) note.textContent = "暂无团队负责人定向发来的任务。";
     return;
   }
-  const owners = ownerId ? [ownerId] : selectedReviewerOwners();
+  const title = intakeTask.workflowTitle || intakeTask.title;
+  const owners = (intakeTask.suggestedOwners || []).filter((id) => ["frontend", "backend", "tester"].includes(id));
   if (!owners.length) {
-    if (note) note.textContent = "至少选择前端、后端或测试中的一个。";
+    if (note) note.textContent = "这条任务没有定向执行 Agent，请团队负责人重新发起。";
     return;
   }
   createReviewerAssignedTasks(title, owners);
+  tasks = tasks.filter((task) => task !== intakeTask);
   setAgent("reviewer", { status: "done" });
   const ownerNames = owners.map((id) => agentById(id)?.name || id).join("、");
-  addLog(`Reviewer 已分配待接受任务给 ${ownerNames}：${title}`, "代码审查者");
-  pushComment("代码审查者", `已判断任务归属，分配给 ${ownerNames}；等待 Agent 接受后执行：${title}`);
-  if (input) input.value = "";
-  if (note) note.textContent = `已分配给 ${ownerNames}，等待他们接受任务。`;
-  renderAgents();
-  renderAgentStrip();
+  addLog(`代码负责人已接收任务并定向启动 ${ownerNames}：${title}`, "代码审查者");
+  pushComment("代码审查者", `已接收团队负责人转交任务，按定向目标通知 ${ownerNames} 接受执行：${title}`);
+  selectedReviewerIntakeKey = "";
+  if (note) note.textContent = `已通知 ${ownerNames}，等待他们接受任务。`;
+  renderAll();
 }
 
 function findWorkflowTask(taskKey) {
@@ -1472,9 +1831,9 @@ function approveReviewerPackage() {
     task.status = "packaged";
   });
   tasks.push(packageTask);
-  writeCollaborativeProjectCode({ ...packageTask, title: groupedTitle });
   setAgent("reviewer", { status: "done" });
   setAgent("master", { status: "idle" });
+  recordMasterTaskHistory("收到交付包", groupedTitle, "代码负责人审核通过并打包，等待团队负责人最终交付。");
   addLog(`Reviewer 审核通过并打包给团队负责人：${groupedTitle}`, "代码审查者");
   pushComment("代码审查者", `代码负责人审核通过，已打包交给团队负责人：${groupedTitle}`);
   if (note) note.textContent = "已审核通过并打包给团队负责人，等待负责人交付。";
@@ -1487,6 +1846,7 @@ function deliverMasterTask(taskKey) {
   const title = task.workflowTitle || task.title;
   tasks = tasks.filter((item) => item.workflowId !== task.workflowId && item.localWorkflowId !== task.localWorkflowId);
   setAgent("master", { status: "done", x: agentById("master").home[0], y: agentById("master").home[1] });
+  recordMasterTaskHistory("最终交付", title, "团队负责人确认交付，任务从执行队列归档。");
   addLog(`团队负责人已交付任务：${title}`, "团队负责人");
   pushComment("团队负责人", `已完成最终交付：${title}`);
   closeAgentQuickPanel();
@@ -1495,23 +1855,14 @@ function deliverMasterTask(taskKey) {
 
 function jumpAgentToCodeArea(agent) {
   if (!agent) return;
-  const map = {
-    master: ["runtime", "Agent.py"],
-    frontend: ["desktop", "app.js"],
-    backend: ["runtime", "server.py"],
-    reviewer: ["runtime", "Agent.py"],
-    tester: ["connectors", "feishu.md"],
-  };
-  const target = map[agent.id] || ["runtime", "server.py"];
-  activeRepoId = target[0];
-  activeFileName = target[1];
+  const activeTask = tasks.find((item) => item.owner === agent.id && ["active", "blocked", "pending", "assigned", "review", "done"].includes(item.status));
+  focusAgentCodeTarget(agent.id, activeTask?.workflowTitle || activeTask?.title || "");
   switchView("community");
-  switchOpenWorldPanel?.("codePanel");
+  switchOpenWorldPanel("codePanel");
+  switchCodingMode("manual");
   renderCommunity();
-  window.setTimeout(() => {
-    document.querySelector("#codePanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, 80);
-  pushComment(agent.name, `我正在查看 ${activeFileName}，会根据这里的建议决定是否采纳并整合。`);
+  window.setTimeout(() => els.manualCodeEditor?.focus(), 0);
+  pushComment(agent.name, `已打开 ${activeFileName} 的完整代码编辑器。`);
 }
 
 function openCoderStudio(agent) {
@@ -1629,7 +1980,7 @@ function renderProjectDeliveryCards() {
         .map(
           (delivery) => {
             const testState = deliveryTestStates[delivery.id] || delivery.last_test_status || "";
-            const testText = "运行环境";
+            const testText = "Agent 测试";
             const testClass = testState ? ` ${testState}` : "";
             const testOutput = deliveryTestStates[`${delivery.id}:output`] || delivery.last_test_output || "";
             const runtimeUrl = deliveryTestStates[`${delivery.id}:url`] || delivery.runtime_url || "";
@@ -1719,11 +2070,95 @@ function renderRuntimeEnvironment() {
   if (els.runtimeProjectFixBtn) els.runtimeProjectFixBtn.disabled = false;
 }
 
+function testerFileForDelivery(delivery = {}) {
+  const title = delivery.title || delivery.workflowTitle || "项目交付测试";
+  return codeTargetForAgent("tester", title);
+}
+
+function openTesterCodeForDelivery(delivery = {}) {
+  const [repoId, fileName] = testerFileForDelivery(delivery);
+  activeRepoId = repoId;
+  activeFileName = fileName;
+  selectedAgentId = "tester";
+  renderAgents();
+  renderAgentStrip();
+  renderCommunity();
+  switchView("community");
+  switchOpenWorldPanel("codePanel");
+}
+
+function mapDeliveryTestResultToTesterCode(deliveryId, result = {}) {
+  const delivery = result.delivery || projectDeliveries.find((item) => String(item.id) === String(deliveryId)) || {};
+  const title = delivery.title || result.title || "项目交付测试";
+  const [repoId, fileName] = testerFileForDelivery({ ...delivery, title });
+  const repo = openWorldRepos.find((item) => item.id === repoId);
+  if (!repo) return;
+  const key = codeKey(repoId, fileName);
+  const baseLines = generatedCodeOverrides[key] || repo.files[fileName] || buildAgentArtifactLines("tester", { id: deliveryId, title }, fileName);
+  const start = "# --- QuantumFlow Agent Test Result ---";
+  const end = "# --- End QuantumFlow Agent Test Result ---";
+  const jsStart = "// --- QuantumFlow Agent Test Result ---";
+  const jsEnd = "// --- End QuantumFlow Agent Test Result ---";
+  const markerStart = fileName.endsWith(".js") ? jsStart : start;
+  const markerEnd = fileName.endsWith(".js") ? jsEnd : end;
+  const cleaned = [];
+  let skipping = false;
+  for (const line of baseLines) {
+    if (line === markerStart) {
+      skipping = true;
+      continue;
+    }
+    if (line === markerEnd) {
+      skipping = false;
+      continue;
+    }
+    if (!skipping) cleaned.push(line);
+  }
+  const mapped = {
+    delivery_id: String(deliveryId),
+    status: result.ok ? "passed" : "failed",
+    runtime_url: result.runtime_url || delivery.runtime_url || deliveryTestStates[`${deliveryId}:url`] || "",
+    output: result.output || delivery.last_test_output || deliveryTestStates[`${deliveryId}:output`] || "",
+    mapped_at: new Date().toLocaleString("zh-CN", { hour12: false }),
+  };
+  const jsonLines = JSON.stringify(mapped, null, 2).split("\n");
+  const block = fileName.endsWith(".js")
+    ? [
+        "",
+        jsStart,
+        `const TEST_RUN_RESULT = ${jsonLines[0]}`,
+        ...jsonLines.slice(1, -1),
+        `${jsonLines[jsonLines.length - 1]};`,
+        "console.log(\"QuantumFlow Agent test mapped\", TEST_RUN_RESULT);",
+        jsEnd,
+      ]
+    : [
+        "",
+        start,
+        `TEST_RUN_RESULT = ${jsonLines[0]}`,
+        ...jsonLines.slice(1),
+        "",
+        "def test_quantumflow_agent_test_result_mapped():",
+        "    assert TEST_RUN_RESULT[\"delivery_id\"]",
+        "    assert TEST_RUN_RESULT[\"status\"] in {\"passed\", \"failed\"}",
+        end,
+      ];
+  generatedCodeOverrides[key] = [...cleaned, ...block];
+  activeRepoId = repoId;
+  activeFileName = fileName;
+  selectedAgentId = "tester";
+  pushComment("测试 Agent", `Agent 测试结果已映射到 ${fileName}：${mapped.status}`, mapped.status === "passed" ? "suggestion" : "issue", key);
+  renderCommunity();
+}
+
 async function testProjectDelivery(deliveryId) {
   if (!deliveryId) return;
   setActiveRuntimeDelivery(deliveryId);
+  const activeDelivery = getActiveRuntimeDelivery() || projectDeliveries.find((item) => String(item.id) === String(deliveryId)) || {};
+  openTesterCodeForDelivery(activeDelivery);
   deliveryTestStates[deliveryId] = "testing";
   deliveryTestStates[`${deliveryId}:output`] = "正在启动测试环境并执行烟测...";
+  mapDeliveryTestResultToTesterCode(deliveryId, { delivery: activeDelivery, ok: false, output: "正在启动测试环境并执行烟测..." });
   renderTasks();
   renderRuntimeEnvironment();
   try {
@@ -1735,10 +2170,12 @@ async function testProjectDelivery(deliveryId) {
     deliveryTestStates[`${deliveryId}:output`] = data.output || delivery.last_test_output || "";
     if (data.runtime_url || delivery.runtime_url) deliveryTestStates[`${deliveryId}:url`] = data.runtime_url || delivery.runtime_url;
     projectDeliveries = projectDeliveries.map((item) => (String(item.id) === String(deliveryId) ? { ...item, ...delivery } : item));
+    mapDeliveryTestResultToTesterCode(deliveryId, { ...data, delivery });
     addLog(data.ok ? "项目运行环境测试通过。" : "项目运行环境测试失败。", "Tester");
   } catch (error) {
     deliveryTestStates[deliveryId] = "failed";
     deliveryTestStates[`${deliveryId}:output`] = error.message || "测试失败";
+    mapDeliveryTestResultToTesterCode(deliveryId, { delivery: activeDelivery, ok: false, output: error.message || "测试失败" });
     addLog(`项目运行环境测试失败：${error.message || "unknown"}`, "Tester");
   }
   renderTasks();
@@ -1804,50 +2241,52 @@ function renderCommunity() {
   const activeRepo = openWorldRepos.find((repo) => repo.id === activeRepoId) || openWorldRepos[0];
   const fileNames = Object.keys(activeRepo.files);
   if (!activeRepo.files[activeFileName]) activeFileName = fileNames[0];
+  const repoCodeScrollTop = els.repoCodeView?.scrollTop || 0;
+  const repoCodeShouldFollow = isRepoCodeNearBottom();
 
   const onlineRows = realOnlineCollaboratorRows();
   els.onlineCount.textContent = String(onlineRows.length);
   els.onlineMiniCount.textContent = String(onlineRows.length);
   els.worldTaskCount.textContent = String(tasks.filter((task) => task.status !== "done").length);
 
-  els.repoList.innerHTML = openWorldRepos
-    .map(
-      (repo) => `
+  const repoRows = openWorldRepos.filter((repo) => {
+    const query = repoInlineQuery.trim().toLowerCase();
+    if (!query) return true;
+    return `${repo.name} ${repo.desc} ${repo.lang} ${Object.keys(repo.files || {}).join(" ")}`.toLowerCase().includes(query);
+  });
+  const repoMarkup = (repo) => `
       <button class="repo-list-item ${repo.id === activeRepoId ? "active" : ""}" data-repo="${repo.id}">
         <strong>${repo.name}</strong>
         <span>${repo.desc}</span>
-        <em>${repo.lang} / ${repo.stars} stars</em>
+        <em>${repo.lang} / ${Object.keys(repo.files || {}).length} files${repo.custom ? " / local" : ""}</em>
       </button>
-    `,
+    `;
+
+  els.repoList.innerHTML = repoRows.length
+    ? repoRows
+    .map(
+      (repo) => repoMarkup(repo),
     )
-    .join("");
+      .join("")
+    : '<div class="profile-empty">没有匹配的内部仓库。</div>';
 
   if (els.repoWindowList) {
-    els.repoWindowList.innerHTML = openWorldRepos
+    els.repoWindowList.innerHTML = repoRows
       .map(
-        (repo) => `
-        <button class="repo-list-item ${repo.id === activeRepoId ? "active" : ""}" data-repo="${repo.id}">
-          <strong>${repo.name}</strong>
-          <span>${repo.desc}</span>
-          <em>${repo.lang} / ${repo.stars} stars</em>
-        </button>
-      `,
+        (repo) => repoMarkup(repo),
       )
       .join("");
   }
   if (els.repoInlineList) {
-    els.repoInlineList.innerHTML = openWorldRepos
+    els.repoInlineList.innerHTML = repoRows.length
+      ? repoRows
       .map(
-        (repo) => `
-        <button class="repo-list-item ${repo.id === activeRepoId ? "active" : ""}" data-repo="${repo.id}">
-          <strong>${repo.name}</strong>
-          <span>${repo.desc}</span>
-          <em>${repo.lang} / ${repo.stars} stars</em>
-        </button>
-      `,
+        (repo) => repoMarkup(repo),
       )
-      .join("");
+          .join("")
+      : '<div class="profile-empty">没有匹配的内部仓库。</div>';
   }
+  renderRepoDetail(activeRepo);
 
   renderSourceOnlineCollaborators(onlineRows);
 
@@ -1866,6 +2305,7 @@ function renderCommunity() {
   els.activeFileName.textContent = activeFileName;
   const codeLines = codeForActiveFile(activeRepo, activeFileName);
   els.repoCodeView.innerHTML = renderCodeLines(codeLines, activeFileName);
+  restoreRepoCodeScroll(repoCodeScrollTop, repoCodeShouldFollow);
   if (els.manualCodeEditor && !els.manualCodeEditor.classList.contains("active")) {
     els.manualCodeEditor.value = codeLines.join("\n");
   }
@@ -1898,7 +2338,6 @@ function renderCommunity() {
       activeRepoId = button.dataset.repo;
       activeFileName = Object.keys(openWorldRepos.find((repo) => repo.id === activeRepoId).files)[0];
       closeToolWindow("repositoriesWindow");
-      switchOpenWorldPanel("codePanel");
       renderCommunity();
     });
   });
@@ -1909,7 +2348,141 @@ function renderCommunity() {
       renderCommunity();
     });
   });
+  document.querySelectorAll("[data-repo-open-file]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.dataset.repoOpenId) activeRepoId = button.dataset.repoOpenId;
+      activeFileName = button.dataset.repoOpenFile;
+      switchOpenWorldPanel("codePanel");
+      renderCommunity();
+    });
+  });
+  document.querySelectorAll("[data-repo-file-form]").forEach((form) => {
+    form.addEventListener("submit", createInternalRepoFile);
+  });
+  document.querySelectorAll("[data-repo-clone]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const repo = openWorldRepos.find((item) => item.id === button.dataset.repoClone);
+      addLog(`已创建仓库拉取任务：${repo?.name || button.dataset.repoClone}`, "Git Bridge");
+    });
+  });
   bindIssueActions();
+}
+
+function renderRepoDetail(repo) {
+  if (!els.repoDetailPanel || !repo) return;
+  const files = Object.keys(repo.files || {});
+  const relatedTasks = tasks.filter((task) => task.repo === repo.id || task.owner === repo.id || String(task.title || "").toLowerCase().includes(repo.name.toLowerCase().split("-")[0]));
+  els.repoDetailPanel.innerHTML = `
+    <section class="repo-detail-hero">
+      <div>
+        <span>QuantumFlow / ${escapeHtml(repo.id)}</span>
+        <h3>${escapeHtml(repo.name)}</h3>
+        <p>${escapeHtml(repo.desc)}</p>
+      </div>
+      <div class="repo-detail-actions">
+        <button type="button" data-world-panel-target="codePanel">打开代码</button>
+        <button type="button" data-repo-clone="${escapeHtml(repo.id)}">拉取</button>
+      </div>
+    </section>
+    <div class="repo-detail-stats">
+      <article><strong>${escapeHtml(repo.lang)}</strong><span>主要语言</span></article>
+      <article><strong>${files.length}</strong><span>文件</span></article>
+      <article><strong>${repo.stars || 0}</strong><span>Stars</span></article>
+      <article><strong>${relatedTasks.length}</strong><span>关联任务</span></article>
+    </div>
+    <section class="repo-file-preview">
+      <div class="qf-panel-head"><h3>仓库文件</h3><span>点击文件会切到代码区查看</span></div>
+      <div class="repo-file-grid">
+        ${files
+          .map(
+            (file) => `
+          <button type="button" data-repo-open-file="${escapeHtml(file)}" data-repo-open-id="${escapeHtml(repo.id)}">
+            <strong>${escapeHtml(file)}</strong>
+            <span>${escapeHtml((repo.files[file] || []).slice(0, 2).join(" / ") || "空文件")}</span>
+          </button>
+        `,
+          )
+          .join("")}
+      </div>
+    </section>
+    <form class="repo-file-create-form" data-repo-file-form="${escapeHtml(repo.id)}">
+      <div class="repo-file-create-head">
+        <span>新增文件</span>
+        <strong>在当前仓库创建文件</strong>
+      </div>
+      <div class="repo-file-create-fields">
+        <label><span>文件路径</span><input name="fileName" type="text" placeholder="src/index.js / README.md" /></label>
+        <label><span>初始内容</span><textarea name="fileBody" placeholder="写一点初始代码或说明"></textarea></label>
+        <button type="submit">创建并打开</button>
+      </div>
+    </form>
+  `;
+}
+
+function createInternalRepo(event) {
+  event.preventDefault();
+  const name = els.repoCreateName?.value.trim();
+  if (!name) return;
+  const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `repo-${Date.now().toString(36)}`;
+  const uniqueId = openWorldRepos.some((repo) => repo.id === id) ? `${id}-${Date.now().toString(36).slice(-4)}` : id;
+  const desc = els.repoCreateDesc?.value.trim() || "QuantumFlow 内部协作仓库";
+  const lang = els.repoCreateLang?.value.trim() || "Code";
+  openWorldRepos.unshift({
+    id: uniqueId,
+    name,
+    desc,
+    lang,
+    stars: 0,
+    custom: true,
+    files: {
+      "README.md": [`# ${name}`, "", desc],
+      ".quantumflow/repo.json": [`{"name":"${name}","lang":"${lang}","createdBy":"${currentUser?.username || "local"}"}`],
+    },
+  });
+  activeRepoId = uniqueId;
+  activeFileName = "README.md";
+  if (els.repoCreateName) els.repoCreateName.value = "";
+  if (els.repoCreateDesc) els.repoCreateDesc.value = "";
+  if (els.repoCreateLang) els.repoCreateLang.value = "";
+  addLog(`新建内部仓库：${name}`, currentUser?.display_name || "你");
+  saveCustomInternalRepos();
+  switchOpenWorldPanel("repositoriesPanel");
+  renderCommunity();
+}
+
+function createInternalRepoFile(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const repo = openWorldRepos.find((item) => item.id === form.dataset.repoFileForm);
+  if (!repo) return;
+  const data = new FormData(form);
+  const fileName = String(data.get("fileName") || "").trim().replace(/\\/g, "/");
+  if (!fileName || fileName.includes("..")) return;
+  const fileBody = String(data.get("fileBody") || "").trim();
+  repo.files[fileName] = fileBody ? fileBody.split("\n") : [`// ${fileName}`, "// Created in QuantumFlow source civilization."];
+  repo.custom = true;
+  activeRepoId = repo.id;
+  activeFileName = fileName;
+  saveCustomInternalRepos();
+  addLog(`仓库 ${repo.name} 新增文件：${fileName}`, currentUser?.display_name || "你");
+  switchOpenWorldPanel("codePanel");
+  renderCommunity();
+}
+
+function isRepoCodeNearBottom(threshold = 80) {
+  if (!els.repoCodeView) return false;
+  const remaining = els.repoCodeView.scrollHeight - els.repoCodeView.clientHeight - els.repoCodeView.scrollTop;
+  return remaining <= threshold;
+}
+
+function restoreRepoCodeScroll(previousTop, shouldFollow) {
+  if (!els.repoCodeView) return;
+  if (shouldFollow) {
+    els.repoCodeView.scrollTop = els.repoCodeView.scrollHeight;
+    return;
+  }
+  const maxTop = Math.max(0, els.repoCodeView.scrollHeight - els.repoCodeView.clientHeight);
+  els.repoCodeView.scrollTop = Math.min(previousTop, maxTop);
 }
 
 function renderIssueItem(issue) {
@@ -1940,7 +2513,7 @@ function describeIssueFromKeywords() {
   const keywords = els.issueKeywordInput?.value.trim() || "";
   const file = els.issueFileInput?.files?.[0];
   const owner = els.issueAgentSelect?.value || "master";
-  const agentName = agentById(owner)?.name || "Master 自动分配";
+  const agentName = agentById(owner)?.name || "前端 Agent";
   const normalized = keywords || "补充当前系统功能";
   const fileText = file ? `\n关联文件：${file.name}，需要 Agent 阅读文件上下文后再执行。` : "";
   const description = [
@@ -2046,31 +2619,88 @@ function highlightCode(line, language) {
   return html || "&nbsp;";
 }
 
+function runCaptainInternalElection() {
+  const candidates = ["master", "frontend", "backend", "reviewer", "tester"];
+  const voters = candidates.filter((id) => agentById(id));
+  const rounds = [1, 2, 3].map((round) => {
+    const votes = {};
+    const ballots = voters.map((voterId) => {
+      const voteFor = chooseCaptainCandidate(voterId, round, candidates);
+      votes[voteFor] = (votes[voteFor] || 0) + 1;
+      return { voterId, voteFor };
+    });
+    const max = Math.max(...Object.values(votes));
+    return {
+      round,
+      ballots,
+      votes,
+      topIds: candidates.filter((id) => votes[id] === max),
+    };
+  });
+  const aggregate = {};
+  rounds.forEach((round) => {
+    Object.entries(round.votes).forEach(([id, count]) => {
+      aggregate[id] = (aggregate[id] || 0) + count;
+    });
+  });
+  const aggregateMax = Math.max(...Object.values(aggregate));
+  const aggregateTopIds = candidates.filter((id) => aggregate[id] === aggregateMax);
+  const lastDecidedRound = [...rounds].reverse().find((round) => round.topIds.length === 1);
+  const needsHumanReview = rounds.every((round) => round.topIds.length > 1);
+  const leaderId = needsHumanReview ? "" : aggregateTopIds.length === 1 ? aggregateTopIds[0] : lastDecidedRound?.topIds[0] || "";
+  captainVotes = aggregate;
+  captainElection = { rounds, leaderId, needsHumanReview, aggregateTopIds };
+}
+
+function chooseCaptainCandidate(voterId, round, candidates) {
+  const pressure = {
+    master: tasks.filter((task) => ["pending", "assigned"].includes(task.status)).length + 2,
+    frontend: tasks.filter((task) => task.owner === "frontend").length + (activeFileName.endsWith(".js") || activeFileName.endsWith(".css") || activeFileName.endsWith(".html") ? 2 : 0),
+    backend: tasks.filter((task) => task.owner === "backend").length + (activeFileName.endsWith(".py") ? 2 : 0),
+    reviewer: tasks.filter((task) => ["review", "delivery", "packaged"].includes(task.status)).length + 1,
+    tester: tasks.filter((task) => task.owner === "tester" || String(task.title || "").includes("测试")).length,
+  };
+  const preference = {
+    master: ["master", "reviewer", "tester"],
+    frontend: ["frontend", "master", "reviewer"],
+    backend: ["backend", "master", "tester"],
+    reviewer: ["reviewer", "master", "tester"],
+    tester: ["tester", "reviewer", "master"],
+  }[voterId] || ["master"];
+  return candidates
+    .map((id) => ({
+      id,
+      score:
+        (pressure[id] || 0) +
+        (preference[0] === id ? 3 : preference[1] === id ? 2 : preference[2] === id ? 1 : 0) +
+        (round === 2 && id === "reviewer" ? 1 : 0) +
+        (round === 3 && id === "master" ? 1 : 0),
+    }))
+    .sort((a, b) => b.score - a.score || candidates.indexOf(a.id) - candidates.indexOf(b.id))[0].id;
+}
+
 function renderCaptainVotes() {
-  const sorted = Object.entries(captainVotes).sort((a, b) => b[1] - a[1]);
-  const leader = agentById(sorted[0][0]);
-  const leaderText = leader ? `${leader.name} 领先` : "未选出";
+  runCaptainInternalElection();
+  const leader = captainElection.leaderId ? agentById(captainElection.leaderId) : null;
+  const leaderText = captainElection.needsHumanReview ? "三轮平票，进入人工审核" : leader ? `${leader.name} 由 Agent 内部选出` : "未选出";
   if (els.captainName) els.captainName.textContent = leaderText;
   if (els.captainInlineName) els.captainInlineName.textContent = leaderText;
+  const roundText = captainElection.rounds
+    .map((round) => `第 ${round.round} 轮：${round.topIds.map((id) => agentById(id)?.name || id).join(" / ")} ${round.topIds.length > 1 ? "平票" : "胜出"}`)
+    .join("；");
   const voteMarkup = agents
     .map(
       (agent) => `
-      <button class="captain-vote" data-agent="${agent.id}">
-        <span><strong>${agent.name}</strong><em>${agent.role}</em></span>
+      <article class="captain-vote ${captainElection.leaderId === agent.id ? "winner" : ""}">
+        <span><strong>${agent.name}</strong><em>${agent.role}</em><small>Agent 内部三轮累计票</small></span>
         <b>${captainVotes[agent.id] || 0}</b>
-      </button>
+      </article>
     `,
     )
     .join("");
-  if (els.captainVoteList) els.captainVoteList.innerHTML = voteMarkup;
-  if (els.captainVoteInlineList) els.captainVoteInlineList.innerHTML = voteMarkup;
-  document.querySelectorAll(".captain-vote").forEach((button) => {
-    button.addEventListener("click", () => {
-      captainVotes[button.dataset.agent] = (captainVotes[button.dataset.agent] || 0) + 1;
-      renderCaptainVotes();
-      pushComment("投票系统", `${agentById(button.dataset.agent).name} 获得一票，队长将负责代码整合。`);
-    });
-  });
+  const summary = `<div class="captain-election-summary"><strong>${escapeHtml(leaderText)}</strong><span>${escapeHtml(roundText)}</span><em>人工不能干预投票；只有三轮全部平票才进入人工审核。</em></div>`;
+  if (els.captainVoteList) els.captainVoteList.innerHTML = summary + voteMarkup;
+  if (els.captainVoteInlineList) els.captainVoteInlineList.innerHTML = summary + voteMarkup;
 }
 
 function switchOpenWorldPanel(panelId) {
@@ -2079,7 +2709,12 @@ function switchOpenWorldPanel(panelId) {
     panel.classList.toggle("active", panel.id === panelId);
   });
   document.querySelectorAll("[data-world-panel-target]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.worldPanelTarget === panelId);
+    const active = button.dataset.worldPanelTarget === panelId;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+    if (active && button.closest(".open-world-actions")) {
+      button.scrollIntoView({ block: "nearest", inline: "center" });
+    }
   });
   if (panelId === "recordsPanel") loadPatchHistory();
   if (panelId === "taskLogsPanel") loadTaskLogs();
@@ -2559,7 +3194,7 @@ function dispatchPulledRequestToAgents(pull) {
   }));
   pull.leaderSummary = "负责人已收到 PR，正在把分支拆给各 Agent 并行处理。";
   pushPublicFeed("Git Bridge", `拉取请求：${pull.title}`, `分支 ${pull.branch || "main"} 已拉取，正在交给 Agent 自动编码。`, "Pull / Agent dispatch");
-  addLog(`PR ${pull.id} 已拉取，负责人开始分配 Agent 任务。`, "Git Bridge");
+  addLog(`PR ${pull.id} 已拉取，负责人开始协调 Agent 任务。`, "Git Bridge");
   renderOpenSourceWorld();
 
   plan.forEach((item, index) => {
@@ -2586,6 +3221,7 @@ function startPullAgentRun(pullId, planItem) {
     fileName: planItem.fileName,
     agentName: agent.name,
     taskTitle: `${pull.title} / ${run.summary}`,
+    taskId: `${pull.id}:${planItem.agentId}:${planItem.fileName}`,
     lines: planItem.lines,
   });
   renderOpenSourceWorld();
@@ -2960,20 +3596,24 @@ async function syncGitRepository(event) {
 }
 
 async function submitAutoCodeTask(event) {
-  event.preventDefault();
+  event?.preventDefault?.();
   const title = els.autoCodeInput?.value.trim() || "";
   if (!title) return;
   const owner = els.autoCodeOwner?.value || "frontend";
   const ownerAgent = agentById(owner) || agentById("frontend");
   const command = `/code ${title}`;
-  const button = els.autoCodeForm.querySelector("button");
-  button.disabled = true;
-  button.textContent = "Agent 编码中";
-  pushComment("你", `自动编码：${ownerAgent.name} 作为主责沟通对象，Master 会拆给前端、后端、测试和 Reviewer 分文件实现《${title}》。`);
+  const button = els.autoCodeForm?.querySelector("button");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Agent 编码中";
+  }
+  pushComment("你", `自动编码：${ownerAgent.name} 直接写入自己的负责文件；Tester 会检查功能和运行入口。`);
   try {
     if (!backendConnected) {
-      writeCollaborativeProjectCode({ id: Date.now(), title, backendId: `local-${Date.now()}`, owner });
-      addLog("后端未连接，已按前端/后端/测试/审查分工生成项目文件。", "System");
+      const task = { id: Date.now(), title, backendId: `local-${Date.now()}`, owner };
+      writeSingleAgentProjectCode(task);
+      focusAgentCodeTarget(owner, title);
+      addLog(`后端未连接，${ownerAgent.name} 已定向写入对应代码文件。`, "System");
       return;
     }
     const response = await fetch("/api/bot/chat", {
@@ -2983,35 +3623,40 @@ async function submitAutoCodeTask(event) {
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || "auto code failed");
-    pushComment("QuantumFlow Bot", result.reply?.payload?.text || "已创建协同编码任务，多个 Agent 会分别写入自己的项目文件。");
-    els.autoCodeInput.value = "";
+    pushComment("QuantumFlow Bot", result.reply?.payload?.text || "已创建协同编码任务，Tester 会检查功能和跨语言兼容性。");
+    if (els.autoCodeInput) els.autoCodeInput.value = "";
     loadIssues();
     loadCodeArtifacts();
   } catch {
     pushComment("QuantumFlow Bot", "自动编码请求失败，请检查后端连接或稍后重试。");
   } finally {
-    button.disabled = false;
-    button.textContent = "启动 Agent";
+    if (button) {
+      button.disabled = false;
+      button.textContent = "启动 Agent";
+    }
   }
 }
 
 function selectAutoAgent(agentId, reason = "") {
+  const normalizedAgent = agentId === "master" ? "frontend" : agentId;
   document.querySelectorAll("[data-auto-agent]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.autoAgent === agentId);
+    button.classList.toggle("active", button.dataset.autoAgent === normalizedAgent);
   });
-  if (els.autoCodeOwner) els.autoCodeOwner.value = agentId;
+  if (els.autoCodeOwner) els.autoCodeOwner.value = normalizedAgent;
+  focusAgentCodeTarget(normalizedAgent, els.autoCodeInput?.value || "");
   if (reason && els.agentArbitrationNote) els.agentArbitrationNote.textContent = reason;
+  renderAutoAgentMonitor();
 }
 
 async function arbitrateAutoAgent() {
   const title = els.autoCodeInput?.value.trim() || "";
   if (!title) {
-    if (els.agentArbitrationNote) els.agentArbitrationNote.textContent = "选择的是主责沟通对象；执行时仍会按职责拆给所有 Agent。";
+    if (els.agentArbitrationNote) els.agentArbitrationNote.textContent = "选择哪个 Agent，就打开并写入它负责的代码文件。";
     return;
   }
   if (!backendConnected) {
     const localOwner = localAgentRecommendation(title);
-    selectAutoAgent(localOwner, `主责推荐：${agentById(localOwner)?.name || localOwner}；仍会分派所有 Agent 写各自文件`);
+    selectAutoAgent(localOwner, `推荐：${agentById(localOwner)?.name || localOwner}；已打开对应代码文件，产物需要能运行。`);
     return;
   }
   try {
@@ -3024,10 +3669,10 @@ async function arbitrateAutoAgent() {
     if (!response.ok) throw new Error(result.detail || "arbitration failed");
     const recommended = result.recommended_agent || "frontend";
     const top = (result.scores || []).find((item) => item.agent_id === recommended);
-    selectAutoAgent(recommended, `主责推荐：${top?.label || recommended} 路 score ${top?.score ?? "-"}；仍会分派所有 Agent`);
+    selectAutoAgent(recommended, `推荐：${top?.label || recommended} 路 score ${top?.score ?? "-"}；已切到对应代码文件。`);
   } catch {
     const localOwner = localAgentRecommendation(title);
-    selectAutoAgent(localOwner, `主责推荐：${agentById(localOwner)?.name || localOwner}；仍会分派所有 Agent 写各自文件`);
+    selectAutoAgent(localOwner, `推荐：${agentById(localOwner)?.name || localOwner}；已切到对应代码文件。`);
   }
 }
 
@@ -3601,6 +4246,226 @@ function vue3BookSeedItems() {
   ];
 }
 
+function vue3LibraryAdminArtifactLines(fileName, taskId, title, branch) {
+  const books = JSON.stringify(vue3BookSeedItems(), null, 2);
+  const appTitle = "图书管理系统";
+  if (fileName.endsWith("src/App.vue")) {
+    return [
+      "<script setup>",
+      "import { computed, reactive } from \"vue\";",
+      "",
+      "const state = reactive({",
+      `  taskId: "${taskId}",`,
+      `  title: "${appTitle}",`,
+      "  query: \"\",",
+      "  category: \"全部分类\",",
+      "  status: \"全部状态\",",
+      "  form: { accessionNo: \"\", title: \"\", author: \"\", publisher: \"\", category: \"软件工程\", status: \"在馆\" },",
+      `  books: ${books}.map((book, index) => ({`,
+      "    id: index + 1,",
+      "    accessionNo: `B-2026-${String(index + 1).padStart(3, \"0\")}`,",
+      "    publisher: index === 0 ? \"Addison-Wesley\" : index === 1 ? \"Microsoft Press\" : \"Pearson\",",
+      "    publishDate: \"2026-06-05\",",
+      "    ...book,",
+      "  })),",
+      "});",
+      "",
+      "const categories = computed(() => [\"全部分类\", ...new Set(state.books.map((book) => book.category))]);",
+      "const statusOptions = [\"全部状态\", \"在馆\", \"借出\", \"预约\", \"维护\"];",
+      "const filteredBooks = computed(() => {",
+      "  const query = state.query.trim().toLowerCase();",
+      "  return state.books.filter((book) => {",
+      "    const text = `${book.accessionNo} ${book.title} ${book.author} ${book.publisher} ${book.category} ${book.status}`.toLowerCase();",
+      "    return (!query || text.includes(query)) &&",
+      "      (state.category === \"全部分类\" || book.category === state.category) &&",
+      "      (state.status === \"全部状态\" || book.status === state.status);",
+      "  });",
+      "});",
+      "const stats = computed(() => ({",
+      "  total: state.books.length,",
+      "  available: state.books.filter((book) => book.status === \"在馆\").length,",
+      "  borrowed: state.books.filter((book) => book.status === \"借出\").length,",
+      "  categories: new Set(state.books.map((book) => book.category)).size,",
+      "}));",
+      "",
+      "function addBook() {",
+      "  if (!state.form.title.trim() || !state.form.author.trim()) return;",
+      "  state.books.unshift({",
+      "    id: Date.now(),",
+      "    accessionNo: state.form.accessionNo.trim() || `B-2026-${Date.now().toString().slice(-4)}`,",
+      "    publishDate: new Date().toISOString().slice(0, 10),",
+      "    ...state.form,",
+      "  });",
+      "  state.form = { accessionNo: \"\", title: \"\", author: \"\", publisher: \"\", category: \"软件工程\", status: \"在馆\" };",
+      "}",
+      "",
+      "function setStatus(book, status) { book.status = status; }",
+      "function removeBook(id) {",
+      "  const index = state.books.findIndex((book) => book.id === id);",
+      "  if (index >= 0) state.books.splice(index, 1);",
+      "}",
+      "</script>",
+      "",
+      "<template>",
+      "  <div class=\"library-admin\">",
+      "    <aside class=\"library-sidebar\">",
+      "      <div class=\"system-title\">Sistema de Administracion de Biblioteca</div>",
+      "      <button class=\"side-item active\">图书管理</button>",
+      "      <button class=\"side-item\">借阅人</button>",
+      "      <button class=\"side-item\">借出图书</button>",
+      "      <button class=\"side-item\">归还图书</button>",
+      "      <button class=\"side-item\">分类</button>",
+      "      <button class=\"side-item\">用户</button>",
+      "      <button class=\"side-item\">报表</button>",
+      "    </aside>",
+      "    <main class=\"library-workbench\">",
+      "      <header class=\"library-topbar\"><h1>{{ state.title }}</h1><span>Vue3 / Manage Books</span></header>",
+      "      <section class=\"summary-strip\">",
+      "        <article><strong>{{ stats.total }}</strong><span>馆藏总数</span></article>",
+      "        <article><strong>{{ stats.available }}</strong><span>在馆</span></article>",
+      "        <article><strong>{{ stats.borrowed }}</strong><span>借出</span></article>",
+      "        <article><strong>{{ stats.categories }}</strong><span>分类</span></article>",
+      "      </section>",
+      "      <section class=\"manage-panel\">",
+      "        <div class=\"panel-title\">Manage Books</div>",
+      "        <form class=\"book-editor\" @submit.prevent=\"addBook\">",
+      "          <label>Accession No.<input v-model=\"state.form.accessionNo\" placeholder=\"例如 B-2026-004\" /></label>",
+      "          <label>Book Title<input v-model=\"state.form.title\" placeholder=\"书名\" /></label>",
+      "          <label>Author<input v-model=\"state.form.author\" placeholder=\"作者\" /></label>",
+      "          <label>Publisher<input v-model=\"state.form.publisher\" placeholder=\"出版社\" /></label>",
+      "          <label>Category<input v-model=\"state.form.category\" placeholder=\"分类\" /></label>",
+      "          <label>Status<select v-model=\"state.form.status\"><option>在馆</option><option>借出</option><option>预约</option><option>维护</option></select></label>",
+      "          <div class=\"form-actions\"><button type=\"submit\">Grabar</button><button type=\"button\" @click=\"state.form = { accessionNo: '', title: '', author: '', publisher: '', category: '软件工程', status: '在馆' }\">Nuevo</button></div>",
+      "        </form>",
+      "        <div class=\"search-row\">",
+      "          <label>Buscar<input v-model=\"state.query\" placeholder=\"搜索书名、作者、编号或分类\" /></label>",
+      "          <select v-model=\"state.category\"><option v-for=\"item in categories\" :key=\"item\">{{ item }}</option></select>",
+      "          <select v-model=\"state.status\"><option v-for=\"item in statusOptions\" :key=\"item\">{{ item }}</option></select>",
+      "        </div>",
+      "        <table class=\"book-table\">",
+      "          <thead><tr><th>Accession</th><th>Book Title</th><th>Description</th><th>Author</th><th>Publish Date</th><th>Publisher</th><th>Category</th><th>Status</th><th>Action</th></tr></thead>",
+      "          <tbody>",
+      "            <tr v-for=\"book in filteredBooks\" :key=\"book.id\">",
+      "              <td>{{ book.accessionNo }}</td><td>{{ book.title }}</td><td>{{ book.category }} / {{ book.status }}</td><td>{{ book.author }}</td><td>{{ book.publishDate }}</td><td>{{ book.publisher }}</td><td>{{ book.category }}</td>",
+      "              <td><select :value=\"book.status\" @change=\"setStatus(book, $event.target.value)\"><option>在馆</option><option>借出</option><option>预约</option><option>维护</option></select></td>",
+      "              <td><button class=\"text-button\" @click=\"removeBook(book.id)\">删除</button></td>",
+      "            </tr>",
+      "          </tbody>",
+      "        </table>",
+      "      </section>",
+      "    </main>",
+      "  </div>",
+      "</template>",
+    ];
+  }
+  if (fileName.endsWith("src/style.css")) {
+    return [
+      ":root { font-family: 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif; color: #122033; background: #e6edf5; }",
+      "* { box-sizing: border-box; }",
+      "body { margin: 0; min-height: 100vh; background: #d8e5ef; color: #102033; }",
+      "button, input, select { font: inherit; }",
+      ".library-admin { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 100vh; }",
+      ".library-sidebar { background: #07466d; color: #fff; border-right: 1px solid #043654; }",
+      ".system-title { height: 52px; display: flex; align-items: center; padding: 0 12px; background: #053858; font-size: 14px; font-weight: 700; }",
+      ".side-item { display: block; width: 100%; height: 42px; border: 0; border-bottom: 1px solid rgba(255,255,255,.16); background: #0b5b89; color: #eaf7ff; text-align: left; padding: 0 14px; cursor: pointer; }",
+      ".side-item.active { background: #1684bd; }",
+      ".library-workbench { min-width: 0; padding: 18px 22px; }",
+      ".library-topbar { height: 58px; display: flex; align-items: center; justify-content: space-between; padding: 0 18px; background: #0a4a72; color: #fff; border: 1px solid #063a5b; }",
+      ".library-topbar h1 { margin: 0; font-size: 24px; }",
+      ".library-topbar span { font-size: 13px; color: #c9e9ff; }",
+      ".summary-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }",
+      ".summary-strip article { background: #fff; border: 1px solid #aac1d1; padding: 12px; }",
+      ".summary-strip strong { display: block; font-size: 24px; color: #0a4a72; }",
+      ".summary-strip span { font-size: 12px; color: #526575; }",
+      ".manage-panel { background: #fff; border: 1px solid #9eb7c9; padding: 12px; box-shadow: 0 1px 2px rgba(16,32,51,.12); }",
+      ".panel-title { font-weight: 800; margin-bottom: 10px; color: #14324a; }",
+      ".book-editor { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)) 150px; gap: 8px 14px; align-items: end; margin-bottom: 12px; }",
+      ".book-editor label, .search-row label { display: grid; gap: 4px; font-size: 12px; color: #23384a; }",
+      ".book-editor input, .book-editor select, .search-row input, .search-row select, .book-table select { height: 30px; border: 1px solid #a7bbc9; background: #fff; color: #102033; padding: 0 8px; }",
+      ".form-actions { display: flex; gap: 8px; }",
+      ".form-actions button { height: 32px; border: 1px solid #7d9db4; background: #e7f0f7; color: #102033; padding: 0 14px; cursor: pointer; }",
+      ".form-actions button:first-child { background: #d8edf9; }",
+      ".search-row { display: grid; grid-template-columns: minmax(220px, 1fr) 180px 160px; gap: 10px; margin: 8px 0 12px; align-items: end; }",
+      ".book-table { width: 100%; border-collapse: collapse; font-size: 12px; }",
+      ".book-table th { background: #dbe7f0; color: #17324a; border: 1px solid #9eb7c9; text-align: left; padding: 7px; }",
+      ".book-table td { border: 1px solid #b6c8d5; padding: 6px; vertical-align: middle; }",
+      ".book-table tr:nth-child(even) { background: #f4f8fb; }",
+      ".text-button { height: 28px; border: 1px solid #9eb7c9; background: #fff; color: #0a5d8f; cursor: pointer; }",
+      "@media (max-width: 860px) { .library-admin { grid-template-columns: 1fr; } .library-sidebar { display: none; } .book-editor, .search-row, .summary-strip { grid-template-columns: 1fr; } .library-workbench { padding: 12px; } .book-table { display: block; overflow: auto; white-space: nowrap; } }",
+    ];
+  }
+  if (fileName.endsWith("tests/book.spec.js")) {
+    return [
+      "import assert from \"node:assert/strict\";",
+      "import fs from \"node:fs\";",
+      "",
+      "const html = fs.readFileSync(\"index.html\", \"utf8\");",
+      "const main = fs.readFileSync(\"src/main.js\", \"utf8\");",
+      "const vue = fs.readFileSync(\"src/App.vue\", \"utf8\");",
+      "const css = fs.readFileSync(\"src/style.css\", \"utf8\");",
+      "",
+      "assert.match(html, /id=\"app\"/);",
+      "assert.match(main, /createApp/);",
+      "assert.match(vue, /图书管理系统/);",
+      "assert.match(vue, /Manage Books/);",
+      "assert.match(vue, /book-table/);",
+      "assert.match(vue, /Accession No/);",
+      "assert.match(vue, /removeBook/);",
+      "assert.match(css, /library-sidebar/);",
+      "assert.match(html, /type=\"module\"/);",
+      "assert.match(main, /vue@3|createApp/);",
+      "assert.ok(!main.includes(\"/api/tasks\"), \"frontend-only project must not depend on FastAPI task API\");",
+      "",
+      `console.log("vue3 library admin smoke ok with compat gate: ${taskId}");`,
+    ];
+  }
+  if (fileName.endsWith("docs/review-checklist.md")) {
+    return [
+      "# Reviewer 审查清单",
+      "",
+      `- 任务：${title}`,
+      `- 任务 ID：${taskId}`,
+      `- 分支：${branch}`,
+      "- 识别结果：Vue3 图书管理后台前端",
+      "",
+      "## 必须通过",
+      "",
+      "- [x] 页面名称固定为“图书管理系统”，不再把需求句子当标题。",
+      "- [x] 页面结构是后台管理系统：左侧菜单、顶部标题、录入表单、搜索区、表格区。",
+      "- [x] 支持新增图书、搜索、分类筛选、状态筛选。",
+      "- [x] 支持状态修改和删除图书。",
+      "- [x] 测试 Agent 检查后台管理布局和核心业务文案。",
+      "- [x] 测试 Agent 检查 Vue3/Vite/浏览器模块入口兼容，不兼容则退回原 Agent 免费重构。",
+    ];
+  }
+  if (fileName.endsWith("README.md")) {
+    return [
+      "# 图书管理系统",
+      "",
+      "这是 QuantumFlow 根据任务语义生成的 Vue3 图书管理后台前端项目。",
+      "",
+      "## 需求理解",
+      "",
+      "- 业务领域：图书馆 / 馆藏后台管理",
+      "- 技术栈：Vue3",
+      "- 开发范围：前端页面，不强行生成后端任务系统",
+      "- 核心功能：后台菜单、图书录入、搜索、分类筛选、状态筛选、表格管理、状态修改和删除",
+      "- 命名修正：页面名称固定为“图书管理系统”，不再把用户指令原文当作系统标题",
+      "",
+      "## 运行",
+      "",
+      "```powershell",
+      "npm install",
+      "npm run dev",
+      "```",
+      "",
+      `任务 ID：${taskId}`,
+      `原始任务：${title}`,
+    ];
+  }
+  return null;
+}
+
 function preferredProjectEntryFile(taskLike = {}) {
   const spec = inferBusinessSpec(taskLike.title || "");
   return isVue3FrontendSpec(spec) ? "src/App.vue" : "app/static/app.js";
@@ -3612,6 +4477,8 @@ function buildAgentArtifactLines(agentId, taskLike = {}, fileName = "") {
   const title = sanitizeCodeText(taskLike.title || "QuantumFlow 自动任务");
   const branch = sanitizeCodeText(taskLike.branch || "main");
   const spec = inferBusinessSpec(title);
+  const libraryAdminLines = isVue3FrontendSpec(spec) ? vue3LibraryAdminArtifactLines(fileName, taskId, title, branch) : null;
+  if (libraryAdminLines) return libraryAdminLines;
 
   if (isVue3FrontendSpec(spec) && fileName.endsWith("package.json")) {
     return [
@@ -3655,7 +4522,7 @@ function buildAgentArtifactLines(agentId, taskLike = {}, fileName = "") {
 
   if (isVue3FrontendSpec(spec) && fileName.endsWith("src/main.js")) {
     return [
-      "import { createApp } from \"https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js\";",
+      "import { createApp } from \"vue\";",
       "",
       "import App from \"./App.vue\";",
       "",
@@ -3790,8 +4657,11 @@ function buildAgentArtifactLines(agentId, taskLike = {}, fileName = "") {
       "assert.match(vue, /新增图书/);",
       "assert.match(vue, /借出/);",
       "assert.match(vue, /filteredBooks/);",
+      "assert.match(html, /type=\"module\"/);",
+      "assert.match(main, /vue@3|createApp/);",
+      "assert.ok(!main.includes(\"/api/tasks\"), \"frontend-only project must not depend on FastAPI task API\");",
       "",
-      `console.log("vue3 library frontend smoke ok: ${taskId}");`,
+      `console.log("vue3 library frontend smoke ok with compat gate: ${taskId}");`,
     ];
   }
 
@@ -3826,6 +4696,7 @@ function buildAgentArtifactLines(agentId, taskLike = {}, fileName = "") {
       "- [x] 前端 Agent 提供 `src/App.vue`、`src/main.js`、`src/style.css`。",
       "- [x] 页面包含图书搜索、分类筛选、状态筛选、新增图书和状态切换。",
       "- [x] 测试 Agent 提供 `tests/book.spec.js` 检查 Vue3 挂载点和核心业务文案。",
+      "- [x] 测试 Agent 检查 Vue3/Vite/浏览器模块入口兼容，不兼容则退回原 Agent 免费重构并返还 token。",
     ];
   }
 
@@ -3947,6 +4818,15 @@ function buildAgentArtifactLines(agentId, taskLike = {}, fileName = "") {
       "        listed = client.get(\"/api/tasks\")",
       "        assert listed.status_code == 200",
       "        assert any(item[\"id\"] == new_id for item in listed.json())",
+      "",
+      "def test_cross_language_contract_compatibility():",
+      "    with TestClient(app) as client:",
+      "        health = client.get(\"/api/health\").json()",
+      "        tasks = client.get(\"/api/tasks\").json()",
+      "        assert isinstance(health[\"task_id\"], str)",
+      "        assert all(isinstance(item[\"id\"], int) for item in tasks)",
+      "        assert all(item[\"status\"] in {\"pending\", \"active\", \"blocked\", \"done\"} for item in tasks)",
+      "        assert client.get(\"/\").headers[\"content-type\"].startswith(\"text/html\")",
     ];
   }
 
@@ -3964,6 +4844,8 @@ function buildAgentArtifactLines(agentId, taskLike = {}, fileName = "") {
       "- [x] 后端 Agent 独立提供 API、SQLite 和业务初始数据。",
       "- [x] 前端 Agent 独立提供列表、搜索筛选、状态按钮和接口联动。",
       "- [x] 测试 Agent 独立覆盖健康检查、初始数据、创建、更新和列表读取。",
+      "- [x] 测试 Agent 额外检查跨语言接口契约、JSON 类型、状态枚举、编码和运行入口兼容。",
+      "- [x] 不兼容时退回原负责 Agent 免费重构，重构 token 直接返还。",
       "- [x] 状态展示中文化，接口状态值保持英文以便程序处理。",
     ];
   }
@@ -4201,6 +5083,12 @@ function runTask(index = currentTaskIndex + 1, options = {}) {
   currentTaskIndex = index;
   const task = tasks[index];
   if (!task) return;
+  if (["done", "review", "packaged", "delivery", "delivered"].includes(task.status)) {
+    const nextIndex = tasks.findIndex((item, itemIndex) => itemIndex > index && ["pending", "assigned", "active"].includes(item.status));
+    if (nextIndex >= 0) runTask(nextIndex, options);
+    else stopAuto();
+    return;
+  }
   const owner = agentById(task.owner);
   if (!owner) return;
   if (task.status === "assigned" && !options.local) {
@@ -4240,6 +5128,15 @@ function runTask(index = currentTaskIndex + 1, options = {}) {
 }
 
 function finishTask(task, owner) {
+  const taskKey = taskDeliveryKey(task);
+  if (deliveredTaskKeys.has(taskKey)) {
+    task.status = "done";
+    setAgent(owner.id, { status: "done", x: owner.home[0], y: owner.home[1] });
+    renderTasks();
+    updateMetrics();
+    return;
+  }
+  deliveredTaskKeys.add(taskKey);
   if (task.requiresReview) {
     task.status = "review";
     writeTaskCompletionCode(task, owner);
@@ -4260,9 +5157,44 @@ function finishTask(task, owner) {
   updateMetrics();
 }
 
-function streamCodeLines({ repoId, fileName, lines, agentName = "Agent", taskTitle = "代码生成", replace = false }) {
+function taskDeliveryKey(task) {
+  return String(task?.backendId || task?.localWorkflowId || task?.id || task?.title || "").trim();
+}
+
+function codeStreamDedupeKey({ repoId, fileName, taskId = "", taskTitle = "" }) {
+  return [repoId, fileName, taskId || taskTitle].map((item) => String(item || "").trim()).join("::");
+}
+
+function streamCodeLines({ repoId, fileName, lines, agentName = "Agent", taskTitle = "代码生成", replace = false, taskId = "" }) {
+  const dedupeKey = codeStreamDedupeKey({ repoId, fileName, taskId, taskTitle });
+  if (queuedCodeStreamKeys.has(dedupeKey) || completedCodeStreamKeys.has(dedupeKey)) {
+    return false;
+  }
+  queuedCodeStreamKeys.add(dedupeKey);
+  streamingCodeQueue.push({ repoId, fileName, lines, agentName, taskTitle, replace, taskId, dedupeKey });
+  processCodeStreamQueue();
+  return true;
+}
+
+function processCodeStreamQueue() {
+  if (streamingCodeActive) return;
+  const next = streamingCodeQueue.shift();
+  if (!next) return;
+  streamingCodeActive = true;
+  runCodeStream(next);
+}
+
+function runCodeStream({ repoId, fileName, lines, agentName = "Agent", taskTitle = "代码生成", replace = false, dedupeKey = "" }) {
   const repo = openWorldRepos.find((item) => item.id === repoId);
-  if (!repo || !repo.files[fileName] || !lines?.length) return;
+  if (!repo || !repo.files[fileName] || !lines?.length) {
+    if (dedupeKey) {
+      queuedCodeStreamKeys.delete(dedupeKey);
+      completedCodeStreamKeys.add(dedupeKey);
+    }
+    streamingCodeActive = false;
+    processCodeStreamQueue();
+    return;
+  }
   const key = codeKey(repoId, fileName);
   if (streamingCodeTimers.has(key)) {
     window.clearInterval(streamingCodeTimers.get(key));
@@ -4274,32 +5206,57 @@ function streamCodeLines({ repoId, fileName, lines, agentName = "Agent", taskTit
   activeFileName = fileName;
   streamingCodeKey = key;
   streamingCodeLineIndex = Math.max(0, base.length - 1);
-  const shouldRevealCode = !document.body.classList.contains("admin-mode") && !document.body.classList.contains("open-source-mode");
-  if (shouldRevealCode) {
-    switchView("community");
-    switchOpenWorldPanel("codePanel");
-  }
   renderCommunity();
   pushComment(agentName, `开始流式写入 ${repo.name}/${fileName}：${taskTitle}`, "streaming", key);
 
-  let index = 0;
+  let lineIndex = 0;
+  let charIndex = 0;
+  let currentLineStarted = false;
   const timer = window.setInterval(() => {
     const current = generatedCodeOverrides[key] || [];
-    current.push(lines[index]);
+    const sourceLine = String(lines[lineIndex] ?? "");
+    if (!currentLineStarted) {
+      current.push("");
+      currentLineStarted = true;
+    }
+    const chunkSize = streamChunkSize(sourceLine, charIndex);
+    current[current.length - 1] += sourceLine.slice(charIndex, charIndex + chunkSize);
     generatedCodeOverrides[key] = current;
     streamingCodeLineIndex = current.length - 1;
     renderCommunity();
-    els.repoCodeView?.scrollTo({ top: els.repoCodeView.scrollHeight, behavior: "smooth" });
-    index += 1;
-    if (index >= lines.length) {
+    charIndex += chunkSize;
+    if (charIndex >= sourceLine.length) {
+      lineIndex += 1;
+      charIndex = 0;
+      currentLineStarted = false;
+    }
+    if (lineIndex >= lines.length) {
       window.clearInterval(timer);
       streamingCodeTimers.delete(key);
       streamingCodeLineIndex = -1;
+      streamingCodeKey = "";
       renderCommunity();
-      pushComment(agentName, `流式写入完成，等待 Review：${taskTitle}`, "suggestion", key);
+      pushComment(agentName, `任务需求代码写入完成，本次执行结束：${taskTitle}`, "suggestion", key);
+      if (dedupeKey) {
+        queuedCodeStreamKeys.delete(dedupeKey);
+        completedCodeStreamKeys.add(dedupeKey);
+      }
+      streamingCodeActive = false;
+      processCodeStreamQueue();
     }
-  }, 260);
+  }, 42);
   streamingCodeTimers.set(key, timer);
+}
+
+function streamChunkSize(line, offset) {
+  if (!line) return 1;
+  const remaining = line.length - offset;
+  if (remaining <= 4) return remaining;
+  if (/^\s*$/.test(line.slice(offset))) return Math.min(remaining, 12);
+  const char = line[offset] || "";
+  if (/[{}()[\],.;:]/.test(char)) return 1;
+  if (/\s/.test(char)) return Math.min(remaining, 4);
+  return Math.min(remaining, line.length > 100 ? 14 : 8);
 }
 
 window.quantumflowStreamCodeLines = streamCodeLines;
@@ -4310,14 +5267,14 @@ function collaborativeProjectPlan(task) {
   const spec = inferBusinessSpec(task.title || "");
   const items = isVue3FrontendSpec(spec)
     ? [
-        { agentId: "master", repoId: "project", fileName: "README.md" },
+        { agentId: "frontend", repoId: "project", fileName: "src/App.vue" },
+        { agentId: "frontend", repoId: "project", fileName: "src/main.js" },
+        { agentId: "frontend", repoId: "project", fileName: "src/style.css" },
         { agentId: "frontend", repoId: "project", fileName: "package.json" },
         { agentId: "frontend", repoId: "project", fileName: "index.html" },
-        { agentId: "frontend", repoId: "project", fileName: "src/main.js" },
-        { agentId: "frontend", repoId: "project", fileName: "src/App.vue" },
-        { agentId: "frontend", repoId: "project", fileName: "src/style.css" },
         { agentId: "tester", repoId: "project", fileName: "tests/book.spec.js" },
         { agentId: "reviewer", repoId: "project", fileName: "docs/review-checklist.md" },
+        { agentId: "master", repoId: "project", fileName: "README.md" },
       ]
     : [
     { agentId: "frontend", repoId: "project", fileName: "app/static/app.js" },
@@ -4337,44 +5294,101 @@ function collaborativeProjectPlan(task) {
 }
 
 function writeCollaborativeProjectCode(task) {
+  const deliveryKey = `collab:${taskDeliveryKey(task)}`;
+  if (codedTaskKeys.has(deliveryKey)) return;
+  codedTaskKeys.add(deliveryKey);
   const plan = collaborativeProjectPlan(task);
-  plan.forEach((item, index) => {
+  const firstItem = plan[0];
+  if (firstItem) {
+    activeRepoId = firstItem.repoId;
+    activeFileName = firstItem.fileName;
+  }
+  plan.forEach((item) => {
+    streamCodeLines({
+      repoId: item.repoId,
+      fileName: item.fileName,
+      agentName: item.agent.name,
+      taskTitle: `${task.title} / ${item.fileName}`,
+      taskId: taskDeliveryKey(task),
+      lines: item.lines,
+      replace: true,
+    });
+  });
+  const compatibility = runCompatibilityGate(task, plan);
+  pushComment("测试 Agent", compatibility.ok ? compatibility.summary : `${compatibility.summary} 已退回 ${compatibility.ownerName} 免费重构。`, compatibility.ok ? "suggestion" : "issue", "project/tests/compatibility");
+  if (!compatibility.ok && compatibility.reworkItem) {
     window.setTimeout(() => {
       streamCodeLines({
-        repoId: item.repoId,
-        fileName: item.fileName,
-        agentName: item.agent.name,
-        taskTitle: `${task.title} / ${item.fileName}`,
-        lines: item.lines,
+        repoId: compatibility.reworkItem.repoId,
+        fileName: compatibility.reworkItem.fileName,
+        agentName: compatibility.reworkItem.agent.name,
+        taskTitle: `${task.title} / 兼容性免费重构`,
+        taskId: `${taskDeliveryKey(task)}:compat:${compatibility.reworkItem.fileName}`,
+        lines: compatibility.reworkItem.lines,
         replace: true,
       });
-    }, index * 260);
+      pushComment(compatibility.reworkItem.agent.name, `已根据 Tester 兼容性门禁免费重构 ${compatibility.reworkItem.fileName}，本次不计 token 消耗。`, "suggestion", codeKey(compatibility.reworkItem.repoId, compatibility.reworkItem.fileName));
+    }, plan.length * 180 + 400);
+  }
+}
+
+function runCompatibilityGate(task, plan) {
+  const byFile = Object.fromEntries(plan.map((item) => [item.fileName, item]));
+  const joined = Object.fromEntries(plan.map((item) => [item.fileName, item.lines.join("\n")]));
+  const spec = inferBusinessSpec(task.title || "");
+  const checks = isVue3FrontendSpec(spec)
+    ? [
+        ["package.json", /"scripts"\s*:\s*\{[\s\S]*"test"/],
+        ["src/main.js", /createApp|mount/],
+        ["src/App.vue", /<template>|books|filtered/i],
+        ["tests/book.spec.js", /package\.json|src\/App\.vue|compat/i],
+        ["docs/review-checklist.md", /兼容|运行|Vue3|Vite/],
+      ]
+    : [
+        ["app/main.py", /@app\.get\("\/api\/health"\)[\s\S]*@app\.get\("\/api\/tasks"\)[\s\S]*@app\.post\("\/api\/tasks"\)/],
+        ["app/static/app.js", /fetch\("\/api\/tasks"\)|fetch\('\/api\/tasks'\)|api\("\/api\/tasks"\)/],
+        ["tests/test_smoke.py", /\/api\/health[\s\S]*\/api\/tasks[\s\S]*compat/i],
+        ["docs/review-checklist.md", /跨语言|兼容|接口契约|编码/],
+      ];
+  const failed = checks.find(([fileName, pattern]) => !byFile[fileName] || !pattern.test(joined[fileName] || ""));
+  if (!failed) {
+    return { ok: true, summary: "兼容性门禁通过：功能、接口契约、运行脚本、编码格式和测试入口一致。" };
+  }
+  const reworkItem = byFile[failed[0]] || plan.find((item) => item.agentId !== "tester") || plan[0];
+  const refund = Math.ceil((reworkItem?.lines.join("\n").length || 0) / 3.8);
+  if (reworkItem) agentTokenRefunds[reworkItem.agentId] = (agentTokenRefunds[reworkItem.agentId] || 0) + refund;
+  return {
+    ok: false,
+    reworkItem,
+    ownerName: reworkItem?.agent.name || "原负责 Agent",
+    summary: `兼容性门禁未通过：${failed[0]} 与项目运行/测试契约不一致。返还 ${formatTokenCount(refund)} token 后重构。`,
+  };
+}
+
+function writeSingleAgentProjectCode(task) {
+  const deliveryKey = `single-agent:${taskDeliveryKey(task)}:${task.owner}`;
+  if (codedTaskKeys.has(deliveryKey)) return;
+  codedTaskKeys.add(deliveryKey);
+  const owner = agentById(task.owner) || agentById("frontend");
+  const [repoId, fileName] = codeTargetForAgent(owner.id, task.title || "");
+  activeRepoId = repoId;
+  activeFileName = fileName;
+  streamCodeLines({
+    repoId,
+    fileName,
+    agentName: owner.name,
+    taskTitle: `${task.title} / ${owner.name} 定向产物`,
+    taskId: taskDeliveryKey(task),
+    lines: buildAgentArtifactLines(owner.id, task, fileName),
+    replace: true,
   });
-  window.setTimeout(() => {
-    activeRepoId = "project";
-    activeFileName = preferredProjectEntryFile(task);
-    renderCommunity();
-  }, plan.length * 280 + 180);
 }
 
 function writeTaskCompletionCode(task, owner) {
-  const spec = inferBusinessSpec(task.workflowTitle || task.title || "");
-  const map = isVue3FrontendSpec(spec)
-    ? {
-        master: ["project", "README.md"],
-        frontend: ["project", "src/App.vue"],
-        backend: ["project", "docs/api-assumption.md"],
-        reviewer: ["project", "docs/review-checklist.md"],
-        tester: ["project", "tests/book.spec.js"],
-      }
-    : {
-    master: ["project", "README.md"],
-    frontend: ["project", "app/static/app.js"],
-    backend: ["project", "app/main.py"],
-    reviewer: ["project", "docs/review-checklist.md"],
-    tester: ["project", "tests/test_smoke.py"],
-  };
-  const target = map[owner.id] || ["runtime", "server.py"];
+  const deliveryKey = `completion:${taskDeliveryKey(task)}:${owner.id}`;
+  if (codedTaskKeys.has(deliveryKey)) return;
+  codedTaskKeys.add(deliveryKey);
+  const target = codeTargetForAgent(owner.id, task.workflowTitle || task.title || "");
   const repo = openWorldRepos.find((item) => item.id === target[0]);
   if (!repo) return;
   const fileName = target[1];
@@ -4383,8 +5397,38 @@ function writeTaskCompletionCode(task, owner) {
     fileName,
     agentName: owner.name,
     taskTitle: task.title,
+    taskId: taskDeliveryKey(task),
     lines: buildAgentArtifactLines(owner.id, task, fileName),
     replace: true,
+  });
+}
+
+function renderAutoAgentMonitor() {
+  if (!els.autoAgentMonitor) return;
+  const selected = els.autoCodeOwner?.value || "frontend";
+  const monitorAgents = ["frontend", "backend", "tester", "reviewer"];
+  els.autoAgentMonitor.innerHTML = monitorAgents
+    .map((id) => {
+      const agent = agentById(id);
+      if (!agent) return "";
+      const ownedTasks = tasks.filter((task) => task.owner === id && !["done", "delivery", "packaged", "delivered"].includes(task.status));
+      const current = ownedTasks.find((task) => ["active", "blocked", "review"].includes(task.status)) || ownedTasks[0];
+      const busy = isAgentBusy(id);
+      return `
+        <button class="auto-agent-load ${selected === id ? "selected" : ""} ${busy ? "busy" : "free"}" type="button" data-auto-agent-monitor="${id}">
+          <span class="load-dot" style="--agent-color:${escapeHtml(agent.color)}"></span>
+          <strong>${escapeHtml(agent.name)}</strong>
+          <em>${escapeHtml(statusLabel(agent.status))} / ${ownedTasks.length} 个任务</em>
+          <small>${escapeHtml(current?.workflowTitle || current?.title || "暂无当前任务")}</small>
+        </button>
+      `;
+    })
+    .join("");
+  document.querySelectorAll("[data-auto-agent-monitor]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = button.dataset.autoAgentMonitor;
+      selectAutoAgent(id, `指定：${agentById(id)?.name || id}；已打开对应代码文件，完成后必须可运行。`);
+    });
   });
 }
 
@@ -4466,14 +5510,14 @@ async function clearTaskQueue() {
   }
 }
 
-async function createTask(title, ownerId) {
+async function createTask(title, ownerId, options = {}) {
   if (!title.trim()) return;
 
   if (backendConnected) {
     await fetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, owner_id: ownerId }),
+      body: JSON.stringify({ title, owner_id: ownerId, source: options.source || "desktop" }),
     });
     if (!paused && socket) {
       socket.send(JSON.stringify({ command: "dispatch_next" }));
@@ -4494,6 +5538,8 @@ async function createTask(title, ownerId) {
     owner: ownerId,
     station: fallbackStation,
     status: "pending",
+    source: options.source || "local",
+    requiresReview: Boolean(options.singleAgent),
   });
   addLog(`新增本地任务：${title}`, agentById(ownerId).name);
   renderAll();
@@ -4503,6 +5549,249 @@ async function createTask(title, ownerId) {
       window.setTimeout(() => runTask(pendingIndex), 120);
     }
   }
+}
+
+function isAgentBusy(agentId) {
+  const agent = agentById(agentId);
+  const busyAgentState = ["walking", "working", "blocked"].includes(agent?.status);
+  const busyTaskState = tasks.some((task) => task.owner === agentId && ["active", "blocked", "assigned", "pending", "review"].includes(task.status));
+  return busyAgentState || busyTaskState;
+}
+
+function agentLoadCount(agentId) {
+  return tasks.filter((task) => task.owner === agentId && !["done", "delivery", "packaged"].includes(task.status)).length;
+}
+
+function masterHandoffSnapshot(preferredOwner = "master") {
+  const coreOwners = ["frontend", "backend", "tester"];
+  const rows = coreOwners.map((id) => {
+    const agent = agentById(id);
+    const busy = isAgentBusy(id);
+    return {
+      id,
+      name: agent?.name || id,
+      role: agent?.role || "Agent",
+      status: agent?.status || "idle",
+      busy,
+      load: agentLoadCount(id),
+    };
+  });
+  const freeRows = rows.filter((item) => !item.busy);
+  const requestedOwners = coreOwners.includes(preferredOwner) ? [preferredOwner] : coreOwners;
+  const targetRows = rows.filter((item) => requestedOwners.includes(item.id) && !item.busy);
+  const reviewerBusy = isAgentBusy("reviewer");
+  return {
+    rows,
+    freeRows,
+    reviewerBusy,
+    requestedOwners,
+    targetRows,
+    canAccept: targetRows.length > 0 && !reviewerBusy,
+    targetOwners: targetRows.map((item) => item.id),
+    targetOwner: "reviewer",
+  };
+}
+
+function requestMasterTaskHandoff(title, preferredOwner = "master") {
+  const cleanTitle = title.trim();
+  if (!cleanTitle) return;
+  const snapshot = masterHandoffSnapshot(preferredOwner);
+  pendingMasterHandoff = {
+    id: `handoff-${Date.now().toString(36)}`,
+    title: cleanTitle,
+    preferredOwner,
+    targetOwner: "reviewer",
+    targetOwners: snapshot.targetOwners,
+    canAccept: snapshot.canAccept,
+  };
+  renderMasterHandoffDialog();
+}
+
+function currentMasterHandoffSnapshot() {
+  const snapshot = masterHandoffSnapshot(pendingMasterHandoff?.preferredOwner || "master");
+  if (!pendingMasterHandoff) return snapshot;
+  const selectedOwners = Array.isArray(pendingMasterHandoff.targetOwners) && pendingMasterHandoff.targetOwners.length
+    ? pendingMasterHandoff.targetOwners.filter((id) => snapshot.freeRows.some((item) => item.id === id))
+    : snapshot.targetOwners;
+  snapshot.selectedOwners = selectedOwners;
+  snapshot.selectedRows = snapshot.rows.filter((item) => selectedOwners.includes(item.id));
+  snapshot.canAcceptSelection = selectedOwners.length > 0 && !snapshot.reviewerBusy;
+  return snapshot;
+}
+
+function renderMasterHandoffDialog(snapshot = currentMasterHandoffSnapshot()) {
+  let dialog = document.getElementById("masterHandoffDialog");
+  if (!dialog) {
+    dialog = document.createElement("section");
+    dialog.id = "masterHandoffDialog";
+    dialog.className = "master-handoff-dialog";
+    dialog.setAttribute("aria-hidden", "true");
+    document.body.appendChild(dialog);
+  }
+  const handoff = pendingMasterHandoff;
+  if (!handoff) return;
+  pendingMasterHandoff.targetOwner = "reviewer";
+  pendingMasterHandoff.targetOwners = snapshot.selectedOwners || snapshot.targetOwners;
+  const canSubmit = snapshot.canAcceptSelection ?? snapshot.canAccept;
+  const targetName = canSubmit ? "代码审查者" : snapshot.reviewerBusy ? "代码审查者忙碌" : "定向 Agent 忙碌";
+  const availableCount = snapshot.freeRows.length;
+  const busyCount = snapshot.rows.length - availableCount;
+  const selectedIds = new Set(snapshot.selectedOwners || snapshot.targetOwners);
+  const selectedNames = (snapshot.selectedRows || snapshot.freeRows).map((item) => item.name).join("、") || "无";
+  const commandPreview = canSubmit
+    ? `任务交接：${handoff.title}；团队负责人接收后通知代码审查者，代码审查者按定向目标启动：${selectedNames}。`
+    : `任务交接：${handoff.title}；${snapshot.reviewerBusy ? "代码审查者正在处理任务" : "定向执行 Agent 正忙"}，暂不接收。`;
+  dialog.innerHTML = `
+    <div class="master-handoff-card" role="dialog" aria-modal="true" aria-label="团队负责人任务接收确认">
+      <header class="master-handoff-head">
+        <div><span>Master 权限确认</span><h3>是否允许团队负责人接收任务，并通知代码负责人协调执行？</h3></div>
+        <button type="button" data-master-handoff-close title="关闭">×</button>
+      </header>
+      <div class="master-handoff-body">
+        <main class="master-handoff-main">
+          <div class="master-command-preview">
+            <code>${escapeHtml(commandPreview)}</code>
+            <button type="button" title="展开任务详情">展开</button>
+          </div>
+          <section class="master-load-grid">
+            ${snapshot.rows
+              .map(
+                (item) => {
+                  const selected = selectedIds.has(item.id);
+                  return `
+              <button type="button" class="${item.busy ? "busy" : `free ${selected ? "selected" : ""}`}" data-master-handoff-worker="${escapeHtml(item.id)}" ${item.busy ? "disabled" : ""} aria-pressed="${selected ? "true" : "false"}">
+                <strong>${escapeHtml(item.name)}</strong>
+                <span>${escapeHtml(item.role)} / ${escapeHtml(statusLabel(item.status))}</span>
+                <em>${item.busy ? `忙碌 · ${item.load} 个任务` : selected ? "已选中" : "点击选择"}</em>
+              </button>
+            `;
+                },
+              )
+              .join("")}
+          </section>
+          <div class="master-handoff-all">
+            <strong>定向执行范围</strong>
+            <span>${escapeHtml(selectedNames)}</span>
+            <em>可单选、复选或一键全选；代码负责人按当前选择启动执行。</em>
+          </div>
+          <div class="master-permission-options">
+            <button class="selected" type="button" data-master-handoff-accept ${canSubmit ? "" : "disabled"}>
+              <span>1.</span><strong>是，团队负责人接收并交给 ${escapeHtml(targetName)}</strong><b>↑↓</b>
+            </button>
+            <button type="button" data-master-handoff-select-all ${availableCount ? "" : "disabled"}>
+              <span>2.</span><strong>全选可用 Agent（${availableCount} 个可用 / ${busyCount} 个忙碌）</strong>
+            </button>
+            <button type="button" data-master-handoff-close>
+              <span>3.</span><strong>否，暂不接收这条任务</strong>
+            </button>
+          </div>
+        </main>
+      </div>
+      <footer class="master-handoff-actions">
+        <button type="button" data-master-handoff-close>跳过</button>
+        <button type="button" data-master-handoff-accept ${canSubmit ? "" : "disabled"}>${canSubmit ? "提交" : "请选择 Agent"}</button>
+      </footer>
+    </div>
+  `;
+  dialog.classList.add("active");
+  dialog.setAttribute("aria-hidden", "false");
+}
+
+function renderHandoffPortrait(agent, options = {}) {
+  if (!agent) return "";
+  const stateText = options.stateText || statusLabel(agent.status) || "待命";
+  const classes = ["handoff-portrait", options.featured ? "featured" : "", options.busy ? "busy" : "free"].join(" ");
+  return `
+    <figure class="${classes}">
+      <div class="handoff-avatar" style="--agent-color:${escapeHtml(agent.color)}">
+        ${agent.crown ? '<i class="handoff-crown"></i>' : ""}
+        <i class="handoff-hair"></i>
+        <i class="handoff-head"></i>
+        <i class="handoff-eye left"></i>
+        <i class="handoff-eye right"></i>
+        <i class="handoff-body"></i>
+        <i class="handoff-arm left"></i>
+        <i class="handoff-arm right"></i>
+        <i class="handoff-leg left"></i>
+        <i class="handoff-leg right"></i>
+      </div>
+      <figcaption>
+        <strong>${escapeHtml(agent.name)}</strong>
+        <span>${escapeHtml(stateText)}</span>
+      </figcaption>
+    </figure>
+  `;
+}
+
+function closeMasterHandoffDialog() {
+  const dialog = document.getElementById("masterHandoffDialog");
+  dialog?.classList.remove("active");
+  dialog?.setAttribute("aria-hidden", "true");
+  pendingMasterHandoff = null;
+}
+
+function selectMasterHandoffOwner(ownerId) {
+  if (!pendingMasterHandoff) return;
+  const snapshot = masterHandoffSnapshot(pendingMasterHandoff.preferredOwner || "master");
+  pendingMasterHandoff.targetOwner = "reviewer";
+  const row = snapshot.freeRows.find((item) => item.id === ownerId);
+  if (!row) {
+    renderMasterHandoffDialog(currentMasterHandoffSnapshot());
+    return;
+  }
+  pendingMasterHandoff.targetOwners = [ownerId];
+  renderMasterHandoffDialog();
+}
+
+function toggleMasterHandoffWorker(workerId) {
+  if (!pendingMasterHandoff) return;
+  const snapshot = masterHandoffSnapshot(pendingMasterHandoff.preferredOwner || "master");
+  if (!snapshot.freeRows.some((item) => item.id === workerId)) return;
+  const current = new Set((pendingMasterHandoff.targetOwners || []).filter((id) => snapshot.freeRows.some((item) => item.id === id)));
+  if (current.has(workerId) && current.size > 1) current.delete(workerId);
+  else if (current.has(workerId) && current.size === 1) current.clear();
+  else current.add(workerId);
+  pendingMasterHandoff.targetOwners = [...current];
+  renderMasterHandoffDialog();
+}
+
+function selectAllMasterHandoffWorkers() {
+  if (!pendingMasterHandoff) return;
+  const snapshot = masterHandoffSnapshot(pendingMasterHandoff.preferredOwner || "master");
+  pendingMasterHandoff.targetOwners = snapshot.freeRows.map((item) => item.id);
+  renderMasterHandoffDialog();
+}
+
+async function acceptMasterHandoff() {
+  if (!pendingMasterHandoff) return;
+  const snapshot = currentMasterHandoffSnapshot();
+  if (!snapshot.canAcceptSelection) {
+    renderMasterHandoffDialog(snapshot);
+    return;
+  }
+  const title = pendingMasterHandoff.title;
+  const selectedOwners = snapshot.selectedOwners;
+  tasks.push({
+    id: `local-${localWorkflowTaskSeq++}`,
+    localWorkflowId: `reviewer-intake-${Date.now().toString(36)}`,
+    workflowId: `wf-${Date.now().toString(36)}`,
+    workflowTitle: title,
+    title,
+    owner: "reviewer",
+    station: stationForOwner("reviewer"),
+    status: "pending",
+    source: "master_handoff",
+    reviewerIntake: true,
+    suggestedOwners: selectedOwners,
+  });
+  setAgent("master", { status: "done" });
+  setAgent("reviewer", { status: "idle" });
+  const ownerNames = selectedOwners.map((id) => agentById(id)?.name || id).join("、");
+  recordMasterTaskHistory("接收并转交", title, `已交给代码负责人；定向执行 Agent：${ownerNames}`);
+  addLog(`团队负责人已接收任务并通知代码负责人：${title}`, "团队负责人");
+  pushComment("团队负责人", `已接收任务并交给代码负责人；已选择执行 Agent：${ownerNames}`);
+  closeMasterHandoffDialog();
+  renderAll();
 }
 
 function startAuto() {
@@ -4666,6 +5955,8 @@ function renderAll() {
   renderAgents();
   renderAgentStrip();
   renderTasks();
+  renderAutoAgentMonitor();
+  if (document.body.classList.contains("profile-mode")) renderProfile();
   updateMetrics();
   renderRuntimeEnvironment();
   renderCommunity();
@@ -4702,8 +5993,7 @@ els.runtimeProjectFrame?.addEventListener("load", () => {
 });
 els.taskForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  createTask(els.taskInput.value, els.ownerSelect.value);
-  els.taskInput.value = "";
+  requestMasterTaskHandoff(els.taskInput.value, els.ownerSelect.value);
 });
 els.clearTasksBtn?.addEventListener("click", clearTaskQueue);
 els.commentForm.addEventListener("submit", (event) => {
@@ -4721,6 +6011,23 @@ els.autoCodeInput?.addEventListener("input", () => {
 });
 els.issueDescribeBtn?.addEventListener("click", describeIssueFromKeywords);
 els.issueCreateForm?.addEventListener("submit", submitManualIssue);
+function openInternalRepoCreateForm() {
+  if (!els.repoCreateForm) return;
+  switchOpenWorldPanel("repoCreatePanel");
+  els.repoCreateName?.focus();
+}
+els.repoQuickCreateBtn?.addEventListener("click", openInternalRepoCreateForm);
+els.repoCreateToggleBtn?.addEventListener("click", openInternalRepoCreateForm);
+els.repoCreateForm?.addEventListener("submit", createInternalRepo);
+document.querySelectorAll(".repo-search").forEach((input) => {
+  input.addEventListener("input", () => {
+    repoInlineQuery = input.value || "";
+    document.querySelectorAll(".repo-search").forEach((peer) => {
+      if (peer !== input) peer.value = repoInlineQuery;
+    });
+    renderCommunity();
+  });
+});
 els.connectorConfigForm?.addEventListener("submit", saveConnectorConfig);
 els.flushOutboxBtn?.addEventListener("click", flushOutboxQueue);
 els.testFeishuBtn?.addEventListener("click", sendFeishuTest);
@@ -4753,24 +6060,40 @@ els.roomDocSaveBtn?.addEventListener("click", saveRoomDoc);
 els.roomBackBtn?.addEventListener("click", () => switchView("developerAdmin"));
 els.roomInviteCopyBtn?.addEventListener("click", () => copyInviteCode(els.roomInviteCopyBtn));
 document.addEventListener("click", (event) => {
+  const handoffAccept = event.target.closest?.("[data-master-handoff-accept]");
+  if (handoffAccept) {
+    acceptMasterHandoff();
+    if (els.taskInput) els.taskInput.value = "";
+    return;
+  }
+  const handoffWorker = event.target.closest?.("[data-master-handoff-worker]");
+  if (handoffWorker) {
+    toggleMasterHandoffWorker(handoffWorker.dataset.masterHandoffWorker);
+    return;
+  }
+  const handoffSelectAll = event.target.closest?.("[data-master-handoff-select-all]");
+  if (handoffSelectAll) {
+    selectAllMasterHandoffWorkers();
+    return;
+  }
+  const handoffClose = event.target.closest?.("[data-master-handoff-close]");
+  if (handoffClose) {
+    closeMasterHandoffDialog();
+    return;
+  }
   const openRoomButton = event.target.closest?.("[data-open-room]");
   if (openRoomButton) openProjectRoom(openRoomButton.dataset.openRoom);
   const reviewerChoice = event.target.closest?.("[data-reviewer-task]");
   if (reviewerChoice) {
-    const input = document.getElementById("reviewerDispatchInput");
-    if (input) {
-      input.value = reviewerChoice.dataset.reviewerTask || "";
-      input.focus();
+    const task = findWorkflowTask(reviewerChoice.dataset.reviewerTask);
+    if (task?.reviewerIntake) {
+      selectedReviewerIntakeKey = String(task.localWorkflowId || task.id);
+      openReviewerDispatchPanel(agentById("reviewer"));
     }
-  }
-  const reviewerToggle = event.target.closest?.("[data-reviewer-owner-toggle]");
-  if (reviewerToggle) {
-    const active = reviewerToggle.getAttribute("aria-pressed") === "true";
-    reviewerToggle.setAttribute("aria-pressed", String(!active));
   }
   const reviewerDispatchSubmit = event.target.closest?.("[data-reviewer-dispatch-submit]");
   if (reviewerDispatchSubmit) {
-    dispatchReviewerTask();
+    dispatchReviewerTask(reviewerDispatchSubmit.dataset.reviewerDispatchSubmit);
   }
   const reviewerReviewSubmit = event.target.closest?.("[data-reviewer-review-submit]");
   if (reviewerReviewSubmit) {
@@ -4800,6 +6123,7 @@ els.loginForm?.addEventListener("submit", submitLogin);
 els.registerForm?.addEventListener("submit", submitRegister);
 els.forgotForm?.addEventListener("submit", submitForgotPassword);
 els.profileForm?.addEventListener("submit", submitProfile);
+els.profileEditBtn?.addEventListener("click", openProfileEditor);
 els.sendRegisterCodeBtn?.addEventListener("click", () => sendAuthCode(els.registerTarget, "register", els.sendRegisterCodeBtn, els.registerCode));
 els.sendForgotCodeBtn?.addEventListener("click", () => sendAuthCode(els.forgotTarget, "reset_password", els.sendForgotCodeBtn, els.forgotCode));
 els.logoutBtn?.addEventListener("click", logout);
@@ -4810,7 +6134,15 @@ document.querySelectorAll("[data-profile-tab]").forEach((button) => {
   button.addEventListener("click", () => switchProfileTab(button.dataset.profileTab));
 });
 document.querySelectorAll("[data-world-panel-target]").forEach((button) => {
-  button.addEventListener("click", () => switchOpenWorldPanel(button.dataset.worldPanelTarget));
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    switchOpenWorldPanel(button.dataset.worldPanelTarget);
+  });
+});
+els.communityView?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-world-panel-target]");
+  if (!button || !els.communityView.contains(button)) return;
+  switchOpenWorldPanel(button.dataset.worldPanelTarget);
 });
 document.querySelectorAll("[data-runtime-open-view]").forEach((button) => {
   button.addEventListener("click", () => openRuntimeFeature(button));
@@ -4839,7 +6171,8 @@ document.querySelectorAll("[data-coding-mode]").forEach((button) => {
 });
 document.querySelectorAll("[data-auto-agent]").forEach((button) => {
   button.addEventListener("click", () => {
-    selectAutoAgent(button.dataset.autoAgent, `手动指定：${agentById(button.dataset.autoAgent)?.name || button.dataset.autoAgent}`);
+    const id = button.dataset.autoAgent;
+    selectAutoAgent(id, `指定：${agentById(id)?.name || id}；已切到它负责的代码文件。`);
   });
 });
 els.studioClose.addEventListener("click", closeCoderStudio);
@@ -5455,6 +6788,9 @@ function onlineRoleForName(name) {
 
 function defaultPermissionsForRole(role) {
   const normalized = String(role || "Developer").toLowerCase();
+  if (normalized === "founder" || normalized === "owner") {
+    return { war_room: true, source_world: true, workspace: true, api_registry: true, member_admin: true, founder_override: true, system_owner: true };
+  }
   if (normalized === "admin") {
     return { war_room: true, source_world: true, workspace: true, api_registry: true, member_admin: true };
   }
@@ -5474,6 +6810,8 @@ function permissionLabels() {
     workspace: "项目房间",
     api_registry: "接口",
     member_admin: "成员管理",
+    founder_override: "创始人覆盖权",
+    system_owner: "系统 Owner",
   };
 }
 
@@ -5517,6 +6855,7 @@ async function addAdminMember(event) {
     return;
   }
   const role = els.adminMemberRole?.value || "Developer";
+  const permissions = role === "Founder" ? defaultPermissionsForRole("Founder") : currentAdminPermissions();
   const response = await fetch("/api/admin/members", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -5525,7 +6864,7 @@ async function addAdminMember(event) {
       name,
       role,
       project_scope: els.adminMemberProject?.value.trim() || "QuantumFlow Core",
-      permissions: currentAdminPermissions(),
+      permissions,
     }),
   });
   const result = await response.json().catch(() => ({}));
@@ -5968,6 +7307,7 @@ function switchView(view) {
   closeBotChatWindow();
   closeAgentQuickPanel();
   const targetView = ["warRoom", "runtimeEnvironment", "community", "openSourceWorld", "developerAdmin", "profile", "projectRoom"].includes(view) ? view : "warRoom";
+  currentView = targetView;
   const runtimeEnvironmentMode = targetView === "runtimeEnvironment";
   const platformMode = targetView === "community";
   const openSourceMode = targetView === "openSourceWorld";
@@ -6006,6 +7346,7 @@ function switchView(view) {
           : "QuantumFlow 调度中枢";
   if (profileMode) els.pageTitle.textContent = "用户信息中心";
   if (projectRoomMode) els.pageTitle.textContent = "项目房间";
+  syncLoginSystemName();
   if (els.taskInput) {
     els.taskInput.placeholder = runtimeEnvironmentMode ? "添加运行环境测试 / 页面报错" : "添加开发任务 / 外部消息";
   }
@@ -6020,6 +7361,7 @@ function switchView(view) {
   if (platformMode) {
     if (location.protocol !== "file:") history.replaceState(null, "", "/platform");
     stopAdminChatPreview();
+    switchOpenWorldPanel("repositoriesPanel");
     renderCommunity();
     loadPatchHistory();
     loadIssues();
@@ -6161,19 +7503,24 @@ async function loadTaskLogs() {
             const actor = agent?.name || item.role || item.agent_id || "System";
             const status = item.status || "ok";
             return `
-              <article class="task-log-item ${status}">
-                <div class="task-log-top">
-                  <strong>${escapeHtml(item.action || "action")}</strong>
-                  <span>${escapeHtml(item.created_at || "")}</span>
+              <details class="task-log-item ${status}">
+                <summary>
+                  <div class="task-log-top">
+                    <strong>${escapeHtml(item.action || "action")}</strong>
+                    <span>${escapeHtml(item.created_at || "")}</span>
+                  </div>
+                  <div class="task-log-meta">
+                    <span>${escapeHtml(actor)}</span>
+                    <span>${escapeHtml(item.task_id || "system")}</span>
+                    <span>${escapeHtml(status)}</span>
+                  </div>
+                </summary>
+                <div class="task-log-detail">
+                  <section><b>输入</b><p>${escapeHtml(item.input_text || "无输入摘要")}</p></section>
+                  <section><b>输出</b><small>${escapeHtml(item.output_text || "无输出摘要")}</small></section>
+                  <section class="task-log-json"><b>复盘</b><code>${escapeHtml(JSON.stringify({ action: item.action, agent_id: item.agent_id, role: item.role, task_id: item.task_id, status }, null, 2))}</code></section>
                 </div>
-                <div class="task-log-meta">
-                  <span>${escapeHtml(actor)}</span>
-                  <span>${escapeHtml(item.task_id || "system")}</span>
-                  <span>${escapeHtml(status)}</span>
-                </div>
-                <p>${escapeHtml(item.input_text || "无输入摘要")}</p>
-                <small>${escapeHtml(item.output_text || "无输出摘要")}</small>
-              </article>
+              </details>
             `;
           })
           .join("")
@@ -6218,6 +7565,7 @@ async function loadCodeArtifacts() {
             lines: artifactLines,
             agentName: agentById(artifact.agent_id)?.name || artifact.agent_id || "Agent",
             taskTitle: artifact.task_id || "后端代码产物",
+            taskId: artifact.id || artifact.task_id || "",
             replace: true,
           });
         }
@@ -6660,6 +8008,7 @@ async function watchAppVersion() {
 
 setupDesktopChrome();
 renderAll();
+loadWorkspaceInternalRepos();
 ensureCodexAdminPresence();
 renderAdminChat();
 renderOnlineCollaborators();
