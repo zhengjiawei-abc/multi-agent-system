@@ -347,6 +347,70 @@ small,
   cursor: pointer;
 }
 
+.task-requirement-chip {
+  display: grid;
+  gap: 3px;
+  margin-top: 7px;
+  border: 1px solid rgba(33, 214, 231, 0.32);
+  border-radius: 7px;
+  background: rgba(33, 214, 231, 0.08);
+  padding: 7px;
+}
+
+.task-requirement-chip span {
+  color: #7ee7ff;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.task-requirement-chip em {
+  overflow: hidden;
+  color: #9fb0d8;
+  font-size: 11px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.requirement-doc-preview {
+  max-height: 142px;
+  overflow: auto;
+  margin: 10px 0;
+  border: 1px solid #27345d;
+  border-radius: 8px;
+  background: #080d1b;
+  color: #cfe7ff;
+  padding: 10px;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.reviewer-agent-status {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.reviewer-agent-status div {
+  display: grid;
+  gap: 3px;
+  border: 1px solid #27345d;
+  border-radius: 8px;
+  background: #0b1020;
+  padding: 9px 10px;
+}
+
+.reviewer-agent-status strong {
+  color: #edf3ff;
+  font-size: 12px;
+}
+
+.reviewer-agent-status span {
+  color: #7ee7ff;
+  font-size: 11px;
+}
+
 .master-handoff-dialog {
   position: fixed;
   inset: 0;
@@ -1712,51 +1776,6 @@ body.admin-mode .agent-strip {
   font-size: 13px;
 }
 
-.agent-accept-summary {
-  display: grid;
-  gap: 8px;
-  margin: 0 0 14px;
-  padding: 10px;
-  border: 1px solid rgba(47, 224, 152, 0.46);
-  border-radius: 8px;
-  background: rgba(47, 224, 152, 0.08);
-}
-
-.agent-accept-summary.accepted {
-  border-color: rgba(33, 214, 231, 0.42);
-  background: rgba(33, 214, 231, 0.08);
-}
-
-.agent-accept-summary.idle {
-  border-color: rgba(143, 155, 184, 0.28);
-  background: rgba(11, 16, 32, 0.48);
-}
-
-.agent-accept-summary strong {
-  margin: 0;
-}
-
-.agent-accept-summary p {
-  margin: 0;
-}
-
-.agent-accept-summary button {
-  height: 34px;
-  border: 0;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #2fe098, #21d6e7);
-  color: #05111b;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-.agent-accept-summary button:disabled {
-  border: 1px solid rgba(143, 155, 184, 0.32);
-  background: rgba(143, 155, 184, 0.12);
-  color: #8f9bb8;
-  cursor: not-allowed;
-}
-
 .agent-quick-actions {
   display: flex;
   justify-content: flex-end;
@@ -1988,8 +2007,7 @@ body.admin-mode .agent-strip {
 }
 
 .reviewer-dispatch-submit,
-.reviewer-review-submit,
-.worker-accept-actions button {
+.reviewer-review-submit {
   height: 38px;
   border: 0;
   border-radius: 8px;
@@ -2004,17 +2022,6 @@ body.admin-mode .agent-strip {
 
 .reviewer-review-submit {
   background: linear-gradient(135deg, #ffcf66, #ff8d72);
-}
-
-.agent-quick-panel.worker-accept-mode {
-  width: 540px;
-  height: 330px;
-  border-color: rgba(47, 224, 152, 0.72);
-  box-shadow: 0 22px 58px rgba(47, 224, 152, 0.14), 0 22px 58px rgba(0, 0, 0, 0.48);
-}
-
-.agent-quick-panel.worker-accept-mode .agent-quick-body {
-  grid-template-columns: 1fr 0.9fr;
 }
 
 .worker-accept-card {
@@ -2063,10 +2070,6 @@ body.admin-mode .agent-strip {
   align-content: center;
   gap: 12px;
   height: 100%;
-}
-
-.worker-accept-actions button {
-  background: linear-gradient(135deg, #2fe098, #21d6e7);
 }
 
 .coder-studio {
@@ -2553,39 +2556,44 @@ body.admin-mode .agent-strip {
 
 .repo-create-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
-  width: min(720px, calc(100% - 28px));
+  width: min(860px, calc(100% - 28px));
   margin: 18px auto;
   padding: 18px;
 }
 
-.repo-create-panel {
+.repo-create-panel,
+.repo-file-create-panel {
   min-height: 560px;
   background:
     linear-gradient(135deg, rgba(126, 231, 255, 0.08), transparent 34%),
     #080d1b;
 }
 
-.repo-create-panel .qf-panel-head {
+.repo-create-panel .qf-panel-head,
+.repo-file-create-panel .qf-panel-head {
   align-items: center;
   padding: 18px 20px;
   border-bottom: 1px solid #27345d;
 }
 
-.repo-create-panel .qf-panel-head h3 {
+.repo-create-panel .qf-panel-head h3,
+.repo-file-create-panel .qf-panel-head h3 {
   margin: 0 0 4px;
   font-size: 22px;
 }
 
-.repo-create-panel .qf-panel-head span {
+.repo-create-panel .qf-panel-head span,
+.repo-file-create-panel .qf-panel-head span {
   color: #7ee7ff;
   font-size: 11px;
   font-weight: 900;
   letter-spacing: 0;
 }
 
-.repo-create-panel .qf-panel-head button {
+.repo-create-panel .qf-panel-head button,
+.repo-file-create-panel .qf-panel-head button {
   height: 34px;
   border: 1px solid #344063;
   border-radius: 7px;
@@ -2601,7 +2609,13 @@ body.admin-mode .agent-strip {
   gap: 7px;
 }
 
-.repo-create-form input {
+.repo-create-wide,
+.repo-create-actions {
+  grid-column: 1 / -1;
+}
+
+.repo-create-form input,
+.repo-create-form select {
   height: 42px;
   border: 1px solid #344063;
   border-radius: 7px;
@@ -2616,12 +2630,127 @@ body.admin-mode .agent-strip {
   justify-content: flex-end;
 }
 
-.qf-repos .qf-panel-head {
+.repo-file-create-page {
+  display: grid;
+  gap: 14px;
+  width: min(920px, calc(100% - 28px));
+  margin: 18px auto;
+}
+
+.repo-file-create-card {
+  display: grid;
+  gap: 14px;
+  border: 1px solid #27345d;
+  border-radius: 8px;
+  background: #0b1020;
+  padding: 16px;
+}
+
+.repo-file-create-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #27345d;
+}
+
+.repo-file-create-title span,
+.repo-file-create-page label span {
+  color: #7ee7ff;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.repo-file-create-title strong {
+  color: #edf3ff;
+  font-size: 16px;
+}
+
+.repo-file-create-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.4fr) minmax(160px, 0.7fr) minmax(160px, 0.7fr);
+  gap: 12px;
+}
+
+.repo-file-create-page label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.repo-file-create-page input,
+.repo-file-create-page select,
+.repo-file-create-page textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #344063;
+  border-radius: 7px;
+  background: #080d1b;
+  color: #edf3ff;
+  padding: 0 12px;
+}
+
+.repo-file-create-page input,
+.repo-file-create-page select {
+  height: 42px;
+}
+
+.repo-file-create-page textarea {
+  min-height: 180px;
+  padding: 12px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.repo-file-create-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #27345d;
+  border-radius: 8px;
+  background: #0b1020;
+  padding: 14px 16px;
+}
+
+.repo-file-create-actions > div {
+  display: flex;
+  gap: 10px;
+}
+
+.repo-file-open-toggle {
+  display: flex !important;
+  grid-template-columns: none !important;
+  align-items: center;
+  color: #9fb0d8;
+  font-size: 13px;
+}
+
+.repo-file-open-toggle input {
+  width: 16px;
+  height: 16px;
+}
+
+.repo-file-create-actions button {
+  height: 36px;
+  border: 1px solid rgba(33, 214, 231, 0.48);
+  border-radius: 7px;
+  background: rgba(33, 214, 231, 0.14);
+  color: #7ee7ff;
+  padding: 0 14px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.qf-repos .qf-panel-head,
+.collaborator-repo-head {
   align-items: center;
   gap: 10px;
 }
 
-.qf-repos .qf-panel-head button {
+.qf-repos .qf-panel-head button,
+.collaborator-repo-head button {
   flex: 0 0 auto;
   min-width: 76px;
   height: 32px;
@@ -2651,13 +2780,23 @@ body.admin-mode .agent-strip {
   }
 
   .repo-file-create-fields,
-  .repo-create-form {
+  .repo-create-form,
+  .repo-file-create-grid {
     grid-template-columns: 1fr;
   }
 
   .repo-file-create-form button,
-  .repo-create-form button {
+  .repo-create-form button,
+  .repo-file-create-actions button {
     width: 100%;
+  }
+
+  .repo-file-create-actions {
+    display: grid;
+  }
+
+  .repo-file-create-actions > div {
+    display: grid;
   }
 }
 
@@ -2747,6 +2886,29 @@ body.admin-mode .agent-strip {
   color: var(--muted);
   border-radius: 6px;
   padding: 0 10px;
+}
+
+.qf-collaborators-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.collaborator-repo-head {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 10px;
+  border-top: 1px solid rgba(143, 155, 184, 0.18);
+}
+
+.collaborator-repo-head strong {
+  color: #edf3ff;
+  font-size: 13px;
+}
+
+.collaborator-repo-list {
+  max-height: 44vh;
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .repo-tabs button.active {
@@ -13850,6 +14012,13 @@ body.desktop-app.runtime-environment-mode .runtime-project-summary p {
   overflow: hidden !important;
 }
 
+body.runtime-environment-mode .runtime-repo-test-panel,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-panel {
+  max-height: none !important;
+  min-height: 180px !important;
+  overflow: visible !important;
+}
+
 body.runtime-environment-mode .runtime-action-stack,
 body.desktop-app.runtime-environment-mode .runtime-action-stack,
 body.runtime-environment-mode .runtime-mini-nav,
@@ -13897,6 +14066,42 @@ body.desktop-app.runtime-environment-mode .runtime-mini-nav button {
 body.runtime-environment-mode .runtime-floating-actions,
 body.desktop-app.runtime-environment-mode .runtime-floating-actions {
   right: 314px !important;
+}
+
+/* Runtime side panel spacing: keep project/run/quick-switch lower and readable. */
+body.runtime-environment-mode .runtime-control-dock,
+body.desktop-app.runtime-environment-mode .runtime-control-dock {
+  gap: 18px !important;
+  padding-top: 22px !important;
+  padding-bottom: 20px !important;
+  overflow-y: auto !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary,
+body.desktop-app.runtime-environment-mode .runtime-project-summary,
+body.runtime-environment-mode .runtime-repo-test-panel,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-panel {
+  max-height: none !important;
+  min-height: 124px !important;
+  padding: 14px !important;
+}
+
+body.runtime-environment-mode .runtime-repo-test-panel,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-panel {
+  margin-top: 6px !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack,
+body.desktop-app.runtime-environment-mode .runtime-action-stack,
+body.runtime-environment-mode .runtime-mini-nav,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav {
+  margin-top: 4px !important;
+}
+
+body.runtime-environment-mode .runtime-repo-test-output,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-output {
+  max-height: 120px !important;
+  overflow-y: auto !important;
 }
 
 @media (max-width: 1120px) {
@@ -14131,6 +14336,144 @@ body.desktop-app.runtime-environment-mode #runtimePreviewRefreshBtn {
     min-width: 0 !important;
     max-width: none !important;
   }
+}
+
+/* Runtime repo launcher visibility: buttons must never be clipped. */
+body.runtime-environment-mode .runtime-control-dock,
+body.desktop-app.runtime-environment-mode .runtime-control-dock {
+  overflow-y: auto !important;
+}
+
+body.runtime-environment-mode .runtime-repo-test-panel,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-panel {
+  display: grid !important;
+  grid-template-rows: auto auto auto minmax(48px, auto) !important;
+  gap: 10px !important;
+  min-height: 228px !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+  padding: 14px !important;
+}
+
+body.runtime-environment-mode .runtime-repo-test-panel *,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-panel * {
+  min-width: 0 !important;
+  transform: none !important;
+  writing-mode: horizontal-tb !important;
+}
+
+body.runtime-environment-mode .runtime-repo-test-actions,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-actions {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  min-height: 38px !important;
+  overflow: visible !important;
+}
+
+body.runtime-environment-mode .runtime-repo-test-actions button,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-actions button {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 36px !important;
+  height: 36px !important;
+  padding: 0 8px !important;
+  white-space: nowrap !important;
+}
+
+body.runtime-environment-mode .runtime-repo-test-output,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-output {
+  min-height: 48px !important;
+  max-height: 96px !important;
+  overflow-y: auto !important;
+}
+
+/* Runtime repo launcher visibility: buttons must never be clipped. */
+body.runtime-environment-mode .runtime-control-dock,
+body.desktop-app.runtime-environment-mode .runtime-control-dock {
+  overflow-y: auto !important;
+}
+
+body.runtime-environment-mode .runtime-repo-test-panel,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-panel {
+  display: grid !important;
+  grid-template-rows: auto auto auto minmax(48px, auto) !important;
+  gap: 10px !important;
+  min-height: 228px !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+  padding: 14px !important;
+}
+
+body.runtime-environment-mode .runtime-repo-test-panel *,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-panel * {
+  min-width: 0 !important;
+  transform: none !important;
+  writing-mode: horizontal-tb !important;
+}
+
+body.runtime-environment-mode .runtime-repo-test-actions,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-actions {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  min-height: 38px !important;
+  overflow: visible !important;
+}
+
+body.runtime-environment-mode .runtime-repo-test-actions button,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-actions button {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 36px !important;
+  height: 36px !important;
+  padding: 0 8px !important;
+  white-space: nowrap !important;
+}
+
+body.runtime-environment-mode .runtime-repo-test-output,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-output {
+  min-height: 48px !important;
+  max-height: 96px !important;
+  overflow-y: auto !important;
+}
+
+/* Runtime side panel lower stack: base spacing for project/run/quick-switch cards. */
+body.runtime-environment-mode .runtime-control-dock,
+body.desktop-app.runtime-environment-mode .runtime-control-dock {
+  align-content: start !important;
+  align-items: stretch !important;
+  gap: 18px !important;
+  padding-top: 34px !important;
+  overflow-y: auto !important;
+}
+
+body.runtime-environment-mode .runtime-project-summary,
+body.desktop-app.runtime-environment-mode .runtime-project-summary {
+  margin-top: 24px !important;
+  min-height: 136px !important;
+  max-height: none !important;
+}
+
+body.runtime-environment-mode .runtime-repo-test-panel,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-panel {
+  margin-top: 18px !important;
+  min-height: 136px !important;
+  max-height: none !important;
+}
+
+body.runtime-environment-mode .runtime-action-stack,
+body.desktop-app.runtime-environment-mode .runtime-action-stack {
+  margin-top: 18px !important;
+}
+
+body.runtime-environment-mode .runtime-mini-nav,
+body.desktop-app.runtime-environment-mode .runtime-mini-nav {
+  margin-top: 12px !important;
 }
 
 /* Runtime environment action bar layout guard */
@@ -15238,6 +15581,7 @@ body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
 }
 
 .runtime-project-summary,
+.runtime-repo-test-panel,
 .runtime-action-stack,
 .runtime-mini-nav {
   border: 1px solid rgba(56, 68, 112, 0.58);
@@ -15278,6 +15622,98 @@ body.desktop-app.runtime-environment-mode .runtime-environment-view.active {
   display: grid;
   gap: 8px;
   padding: 12px;
+}
+
+.runtime-repo-test-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.runtime-repo-test-head {
+  display: grid;
+  gap: 3px;
+}
+
+.runtime-repo-test-head span,
+.runtime-repo-test-panel label span {
+  color: #2fe098;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.runtime-repo-test-head strong {
+  color: #edf3ff;
+  font-size: 14px;
+}
+
+.runtime-repo-test-panel label {
+  display: grid;
+  gap: 6px;
+}
+
+.runtime-repo-test-panel select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid rgba(78, 140, 255, 0.48);
+  border-radius: 7px;
+  background: #0f172d;
+  color: #edf3ff;
+  padding: 0 9px;
+}
+
+.runtime-repo-test-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.runtime-repo-test-actions button {
+  min-height: 34px;
+  border: 1px solid rgba(47, 224, 152, 0.52);
+  border-radius: 7px;
+  background: rgba(47, 224, 152, 0.12);
+  color: #edf3ff;
+  font-weight: 900;
+}
+
+.runtime-repo-test-actions button:last-child {
+  border-color: rgba(33, 214, 231, 0.5);
+  background: rgba(33, 214, 231, 0.1);
+}
+
+.runtime-repo-test-actions button:nth-child(2) {
+  border-color: rgba(255, 196, 77, 0.52);
+  background: rgba(255, 196, 77, 0.12);
+}
+
+.runtime-repo-test-output {
+  min-height: 52px;
+  max-height: 128px;
+  overflow: auto;
+  border: 1px solid rgba(143, 155, 184, 0.24);
+  border-radius: 7px;
+  background: rgba(5, 10, 22, 0.44);
+  color: #c7d2f3;
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 9px;
+}
+
+.runtime-repo-test-output strong,
+.runtime-repo-test-output em {
+  display: block;
+}
+
+.runtime-repo-test-output ul {
+  margin: 7px 0;
+  padding-left: 18px;
+}
+
+.runtime-repo-test-output em {
+  color: #8f9bb8;
+  font-style: normal;
 }
 
 .runtime-action-stack button {
@@ -16575,7 +17011,9 @@ body.desktop-app.runtime-environment-mode .runtime-control-dock {
 }
 
 body.runtime-environment-mode .runtime-project-summary,
-body.desktop-app.runtime-environment-mode .runtime-project-summary {
+body.desktop-app.runtime-environment-mode .runtime-project-summary,
+body.runtime-environment-mode .runtime-repo-test-panel,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-panel {
   flex: 0 0 auto !important;
   display: grid !important;
   gap: 6px !important;
@@ -16589,6 +17027,8 @@ body.desktop-app.runtime-environment-mode .runtime-project-summary {
 
 body.runtime-environment-mode .runtime-project-summary *,
 body.desktop-app.runtime-environment-mode .runtime-project-summary *,
+body.runtime-environment-mode .runtime-repo-test-panel *,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-panel *,
 body.runtime-environment-mode .runtime-mini-nav *,
 body.desktop-app.runtime-environment-mode .runtime-mini-nav * {
   writing-mode: horizontal-tb !important;
@@ -16772,6 +17212,12 @@ body.desktop-app.runtime-environment-mode .runtime-live-surface {
 body.runtime-environment-mode .runtime-control-dock,
 body.desktop-app.runtime-environment-mode .runtime-control-dock {
   grid-area: dock !important;
+  align-content: start !important;
+  align-items: stretch !important;
+  gap: 18px !important;
+  padding-top: 40px !important;
+  padding-bottom: 24px !important;
+  overflow-y: auto !important;
 }
 
 body.runtime-environment-mode .runtime-live-toolbar,
@@ -16831,4 +17277,40 @@ body.desktop-app.runtime-environment-mode #runtimePreviewRefreshBtn {
     min-width: 0 !important;
     max-width: none !important;
   }
+}
+/* Runtime repo launcher EOF guard: buttons must never be clipped. */
+body.runtime-environment-mode .runtime-repo-test-panel,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-panel {
+  display: grid !important;
+  grid-template-rows: auto auto auto minmax(48px, auto) !important;
+  min-height: 228px !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+body.runtime-environment-mode .runtime-repo-test-actions,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-actions {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  min-height: 38px !important;
+  overflow: visible !important;
+}
+
+body.runtime-environment-mode .runtime-repo-test-actions button,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-actions button {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 36px !important;
+  height: 36px !important;
+  padding: 0 8px !important;
+  white-space: nowrap !important;
+}
+
+body.runtime-environment-mode .runtime-repo-test-output,
+body.desktop-app.runtime-environment-mode .runtime-repo-test-output {
+  min-height: 48px !important;
+  max-height: 96px !important;
+  overflow-y: auto !important;
 }

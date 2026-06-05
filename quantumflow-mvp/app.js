@@ -354,6 +354,8 @@ let masterTaskHistory = [];
 let projectDeliveries = [];
 let activeRuntimeDeliveryId = localStorage.getItem("qfActiveRuntimeDeliveryId") || "";
 const deliveryTestStates = {};
+let activeRuntimeRepoId = localStorage.getItem("qfActiveRuntimeRepoId") || "";
+const runtimeRepoTestStates = {};
 let adminChatTimer = null;
 const publicChatMessages = [];
 const adminChatMessageIds = new Set();
@@ -547,6 +549,11 @@ const els = {
   runtimePreviewEmpty: document.getElementById("runtimePreviewEmpty"),
   runtimePreviewAddress: document.getElementById("runtimePreviewAddress"),
   runtimePreviewRefreshBtn: document.getElementById("runtimePreviewRefreshBtn"),
+  runtimeRepoSelect: document.getElementById("runtimeRepoSelect"),
+  runtimeRepoTestBtn: document.getElementById("runtimeRepoTestBtn"),
+  runtimeRepoPreviewBtn: document.getElementById("runtimeRepoPreviewBtn"),
+  runtimeRepoOpenCodeBtn: document.getElementById("runtimeRepoOpenCodeBtn"),
+  runtimeRepoTestOutput: document.getElementById("runtimeRepoTestOutput"),
   communityView: document.getElementById("communityView"),
   openSourceWorldView: document.getElementById("openSourceWorldView"),
   profileView: document.getElementById("profileView"),
@@ -630,7 +637,21 @@ const els = {
   repoCreateForm: document.getElementById("repoCreateForm"),
   repoCreateName: document.getElementById("repoCreateName"),
   repoCreateDesc: document.getElementById("repoCreateDesc"),
-  repoCreateLang: document.getElementById("repoCreateLang"),
+  repoCreateType: document.getElementById("repoCreateType"),
+  repoCreateFrontendLang: document.getElementById("repoCreateFrontendLang"),
+  repoCreateBackendLang: document.getElementById("repoCreateBackendLang"),
+  repoCreateDatabase: document.getElementById("repoCreateDatabase"),
+  repoCreateVisibility: document.getElementById("repoCreateVisibility"),
+  repoCreateTemplate: document.getElementById("repoCreateTemplate"),
+  repoFileCreateForm: document.getElementById("repoFileCreateForm"),
+  repoFileCreateCrumb: document.getElementById("repoFileCreateCrumb"),
+  repoFileCreateRepoName: document.getElementById("repoFileCreateRepoName"),
+  repoFileCreateName: document.getElementById("repoFileCreateName"),
+  repoFileCreateKind: document.getElementById("repoFileCreateKind"),
+  repoFileCreateAgent: document.getElementById("repoFileCreateAgent"),
+  repoFileCreatePurpose: document.getElementById("repoFileCreatePurpose"),
+  repoFileCreateBody: document.getElementById("repoFileCreateBody"),
+  repoFileCreateOpen: document.getElementById("repoFileCreateOpen"),
   gitSyncForm: document.getElementById("gitSyncForm"),
   gitSyncUrl: document.getElementById("gitSyncUrl"),
   gitSyncName: document.getElementById("gitSyncName"),
@@ -1460,13 +1481,6 @@ function openAgentQuickPanel(agent) {
     openMasterHistoryPanel(agent);
     return;
   }
-  if (["frontend", "backend", "tester"].includes(agent.id)) {
-    const acceptTask = tasks.find((item) => item.owner === agent.id && ["assigned", "pending"].includes(item.status));
-    if (acceptTask) {
-      openWorkerAcceptPanel(agent, acceptTask);
-      return;
-    }
-  }
   const task = tasks.find((item) => item.owner === agent.id && ["active", "blocked", "pending", "review"].includes(item.status));
   const lines = codeSamples[agent.id] || [];
   const panelWidth = 520;
@@ -1492,7 +1506,6 @@ function openAgentQuickPanel(agent) {
   els.agentQuickExplain.innerHTML = `
     <strong>当前任务</strong>
     <p>${escapeHtml(task ? task.title : "暂无任务，等待调度。")}</p>
-    ${renderWorkerAcceptSummary(agent, task)}
     <strong>速览模式</strong>
     <p>这里可以直接看这个 Agent 正在写什么、每行代码的意图，以及它和当前业务流的关系。</p>
     <strong>继续深入</strong>
@@ -1500,36 +1513,6 @@ function openAgentQuickPanel(agent) {
   `;
   els.agentQuickPanel.classList.add("active");
   els.agentQuickPanel.setAttribute("aria-hidden", "false");
-}
-
-function renderWorkerAcceptSummary(agent, task) {
-  if (!["frontend", "backend", "tester"].includes(agent.id)) return "";
-  if (!task) {
-    return `
-      <div class="agent-accept-summary idle">
-        <strong>接受任务</strong>
-        <p>当前没有需要 ${escapeHtml(agent.name)} 处理的任务。</p>
-        <button type="button" disabled>等待任务</button>
-      </div>
-    `;
-  }
-  const taskKey = escapeHtml(task.localWorkflowId || task.id);
-  if (["assigned", "pending"].includes(task.status)) {
-    return `
-      <div class="agent-accept-summary">
-        <strong>接受任务</strong>
-        <p>任务已到达 ${escapeHtml(agent.name)}，接受后开始执行。</p>
-        <button type="button" data-worker-accept-task="${taskKey}">接受任务</button>
-      </div>
-    `;
-  }
-  return `
-    <div class="agent-accept-summary accepted">
-      <strong>接受任务</strong>
-      <p>任务已接受，当前状态：${escapeHtml(statusLabel(task.status))}。</p>
-      <button type="button" disabled>已接受</button>
-    </div>
-  `;
 }
 
 function positionAgentQuickPanel(agent, width = 520, height = 360) {
@@ -1548,6 +1531,72 @@ function recordMasterTaskHistory(type, title, detail = "") {
     time: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
   });
   masterTaskHistory = masterTaskHistory.slice(0, 12);
+}
+
+function generateMasterRequirementDoc(title, ownerIds = []) {
+  const activeRepo = openWorldRepos.find((repo) => repo.id === activeRepoId) || openWorldRepos[0];
+  const ownerNames = ownerIds.map((id) => agentById(id)?.name || id).filter(Boolean);
+  const spec = inferBusinessSpec(title || "");
+  const repoName = activeRepo?.name || activeRepoId || "当前仓库";
+  const targets = ownerIds
+    .map((id) => {
+      const file = bestCodeTargetInRepo(activeRepo, id, title) || activeFileName || "README.md";
+      return `${agentById(id)?.name || id} -> ${repoName}/${file}`;
+    })
+    .join("；");
+  return {
+    id: `REQ-${Date.now().toString(36).toUpperCase()}`,
+    title,
+    repoId: activeRepo?.id || activeRepoId,
+    repoName,
+    owners: ownerIds,
+    ownerNames,
+    summary: `团队负责人已接收任务，并把需求固化为技术书；代码负责人只能按这份技术书定向启动执行。`,
+    scope: `围绕“${title}”完成可运行、可验收的代码变更，不允许脱离当前仓库上下文。`,
+    architecture: `当前仓库：${repoName}；领域识别：${spec.entityLabel || "通用业务"}；前端/后端/测试/审查按职责拆分。`,
+    acceptance: [
+      "每个 Agent 只写入自己职责范围内的文件。",
+      "生成结果必须能运行，不能只生成静态说明。",
+      "测试 Agent 必须补充验收或烟测入口。",
+      "Reviewer 审核通过后才能打包回团队负责人交付。",
+    ],
+    targets,
+  };
+}
+
+function renderRequirementDoc(doc) {
+  if (!doc) return "暂无技术书。";
+  return [
+    `技术书编号：${doc.id}`,
+    `任务：${doc.title}`,
+    `目标仓库：${doc.repoName}`,
+    `定向 Agent：${(doc.ownerNames || []).join("、") || "待定"}`,
+    `职责文件：${doc.targets || "待代码负责人定位"}`,
+    `范围：${doc.scope}`,
+    `架构：${doc.architecture}`,
+    "验收标准：",
+    ...(doc.acceptance || []).map((item) => `- ${item}`),
+  ].join("\n");
+}
+
+function prependRequirementContext(lines, taskLike = {}, agentName = "Agent", fileName = "") {
+  if (!taskLike.requirementDoc) return lines;
+  const lower = String(fileName || "").toLowerCase();
+  const comment = (text) => {
+    if (lower.endsWith(".py") || lower.endsWith(".yml") || lower.endsWith(".yaml") || lower.endsWith(".toml")) return `# ${text}`;
+    if (lower.endsWith(".md")) return `> ${text}`;
+    if (lower.endsWith(".html")) return `<!-- ${text} -->`;
+    return `// ${text}`;
+  };
+  const header = [
+    comment(`QuantumFlow 技术书：${taskLike.requirementDoc.id}`),
+    comment(`执行 Agent：${agentName}`),
+    comment(`目标文件：${fileName}`),
+    comment(`任务范围：${taskLike.requirementDoc.scope}`),
+    comment(`验收：${(taskLike.requirementDoc.acceptance || []).join("；")}`),
+    "",
+  ];
+  return [...header, ...lines];
 }
 
 function openMasterHistoryPanel(agent) {
@@ -1582,7 +1631,8 @@ function openMasterHistoryPanel(agent) {
 function openReviewerDispatchPanel(agent) {
   const intakeTasks = tasks.filter((item) => item.owner === "reviewer" && item.reviewerIntake && item.status === "pending");
   const reviewTasks = tasks.filter((item) => item.status === "review");
-  const candidates = [...intakeTasks, ...reviewTasks];
+  const workerTasks = tasks.filter((item) => item.requiresReview && !item.reviewerIntake && ["active", "assigned", "pending", "review", "done"].includes(item.status));
+  const candidates = [...intakeTasks, ...workerTasks, ...reviewTasks.filter((item) => !workerTasks.includes(item))];
   const panelWidth = 600;
   const panelHeight = 390;
   const x = Math.max(18, Math.min(agent.x - 500, 1280 - panelWidth));
@@ -1594,7 +1644,7 @@ function openReviewerDispatchPanel(agent) {
   els.agentQuickTitle.textContent = "代码审查者的任务启动台";
   els.agentQuickCode.innerHTML = `
     <div class="reviewer-dispatch-list">
-      <div class="reviewer-dispatch-head"><span>待接收 / 待审核</span><strong>${candidates.length}</strong></div>
+      <div class="reviewer-dispatch-head"><span>待接收 / 执行中 / 待审核</span><strong>${candidates.length}</strong></div>
       ${
         candidates.length
           ? candidates
@@ -1615,6 +1665,13 @@ function openReviewerDispatchPanel(agent) {
   const selectedIntake =
     intakeTasks.find((task) => String(task.localWorkflowId || task.id) === String(selectedReviewerIntakeKey)) ||
     intakeTasks[0];
+  const statusRows = (selectedIntake?.suggestedOwners || ["frontend", "backend", "tester"])
+    .map((id) => {
+      const task = workerTasks.find((item) => item.owner === id && (!selectedIntake || item.workflowTitle === selectedIntake.workflowTitle || item.workflowId === selectedIntake.workflowId));
+      const target = codeTargetForAgent(id, selectedIntake?.workflowTitle || selectedIntake?.title || task?.workflowTitle || task?.title || "");
+      return `<div><strong>${escapeHtml(agentById(id)?.name || id)}</strong><span>${escapeHtml(statusLabel(task?.status || agentById(id)?.status || "idle"))} / ${escapeHtml(target[1])}</span></div>`;
+    })
+    .join("");
   els.agentQuickExplain.innerHTML = `
     <form class="reviewer-dispatch-form" id="reviewerDispatchForm">
       <strong>接收任务</strong>
@@ -1623,36 +1680,15 @@ function openReviewerDispatchPanel(agent) {
         <strong>${escapeHtml(selectedIntake?.title || "暂无待接收任务")}</strong>
         <p>${escapeHtml(selectedIntake ? `执行 Agent：${directedOwnersText(selectedIntake.suggestedOwners)}` : "代码负责人只接收任务；执行对象由团队负责人定向传入。")}</p>
       </div>
-      <button class="reviewer-dispatch-submit" type="button" data-reviewer-dispatch-submit="${escapeHtml(selectedIntake?.localWorkflowId || selectedIntake?.id || "")}" ${selectedIntake ? "" : "disabled"}>接收任务并启动定向 Agent</button>
+      <pre class="requirement-doc-preview">${escapeHtml(renderRequirementDoc(selectedIntake?.requirementDoc))}</pre>
+      <div class="reviewer-agent-status">${statusRows}</div>
+      <button class="reviewer-dispatch-submit" type="button" data-reviewer-dispatch-submit="${escapeHtml(selectedIntake?.localWorkflowId || selectedIntake?.id || "")}" ${selectedIntake ? "" : "disabled"}>接收任务并一键执行定向 Agent</button>
       <button class="reviewer-review-submit" type="button" data-reviewer-review-submit>审核通过并打包给团队负责人</button>
-      <p class="reviewer-dispatch-note" id="reviewerDispatchNote">按团队负责人当前选择的 Agent 启动；需要调整时可退回团队负责人重新选择。</p>
+      <p class="reviewer-dispatch-note" id="reviewerDispatchNote">代码负责人一键启动后，前端、后端、测试会直接写自己的职责文件；这里持续显示当前状态。</p>
     </form>
   `;
   els.agentQuickEditorBtn.textContent = "打开代码区";
   els.agentQuickPanel.classList.add("active", "reviewer-dispatch-mode");
-  els.agentQuickPanel.setAttribute("aria-hidden", "false");
-}
-
-function openWorkerAcceptPanel(agent, task) {
-  positionAgentQuickPanel(agent, 540, 330);
-  els.agentQuickKicker.textContent = `${agent.role} / 待接受`;
-  els.agentQuickTitle.textContent = `${agent.name} 的任务接收台`;
-  els.agentQuickCode.innerHTML = `
-    <div class="worker-accept-card">
-      <span>Reviewer 启动</span>
-      <strong>${escapeHtml(task.title)}</strong>
-      <p>${escapeHtml(agent.name)} 需要先接受任务，接受后才进入执行状态。</p>
-    </div>
-  `;
-  els.agentQuickExplain.innerHTML = `
-    <div class="worker-accept-actions">
-      <strong>接受后执行</strong>
-      <p>执行完成后会回到 Reviewer 审核；Reviewer 审核通过后打包给团队负责人交付。</p>
-      <button type="button" data-worker-accept-task="${escapeHtml(task.localWorkflowId || task.id)}">接受任务</button>
-    </div>
-  `;
-  els.agentQuickEditorBtn.textContent = "打开代码区";
-  els.agentQuickPanel.classList.add("active", "worker-accept-mode");
   els.agentQuickPanel.setAttribute("aria-hidden", "false");
 }
 
@@ -1675,14 +1711,14 @@ function openMasterDeliveryPanel(agent, task) {
     </div>
   `;
   els.agentQuickEditorBtn.textContent = "查看交付代码";
-  els.agentQuickPanel.classList.add("active", "worker-accept-mode");
+  els.agentQuickPanel.classList.add("active", "master-delivery-mode");
   els.agentQuickPanel.setAttribute("aria-hidden", "false");
 }
 
 function closeAgentQuickPanel() {
   els.agentQuickPanel?.classList.remove("active");
   els.agentQuickPanel?.classList.remove("reviewer-dispatch-mode");
-  els.agentQuickPanel?.classList.remove("worker-accept-mode");
+  els.agentQuickPanel?.classList.remove("master-delivery-mode");
   els.agentQuickPanel?.classList.remove("master-history-mode");
   els.agentQuickPanel?.setAttribute("aria-hidden", "true");
   if (els.agentQuickEditorBtn) els.agentQuickEditorBtn.textContent = "进入完整编辑器";
@@ -1710,6 +1746,12 @@ function coreOwnersLabel(ownerIds = []) {
 }
 
 function codeTargetForAgent(agentId, title = "") {
+  const activeRepo = openWorldRepos.find((repo) => repo.id === activeRepoId) || openWorldRepos[0];
+  if (agentId === "tester" && activeRepo) return [activeRepo.id, defaultCodeFileForAgent(activeRepo, "tester")];
+  if (agentId === "reviewer" && activeRepo) return [activeRepo.id, defaultCodeFileForAgent(activeRepo, "reviewer")];
+  const activeRepoTarget = bestCodeTargetInRepo(activeRepo, agentId, title);
+  if (activeRepoTarget) return [activeRepo.id, activeRepoTarget];
+
   const spec = inferBusinessSpec(title || "");
   const vueTargets = {
     frontend: ["project", "src/App.vue"],
@@ -1723,14 +1765,82 @@ function codeTargetForAgent(agentId, title = "") {
     tester: ["project", "tests/test_smoke.py"],
     reviewer: ["project", "docs/review-checklist.md"],
   };
-  return (isVue3FrontendSpec(spec) ? vueTargets : appTargets)[agentId] || appTargets.frontend;
+  const fallback = (isVue3FrontendSpec(spec) ? vueTargets : appTargets)[agentId] || appTargets.frontend;
+  const fallbackRepo = openWorldRepos.find((repo) => repo.id === fallback[0]);
+  if (fallbackRepo) {
+    const fallbackFile = bestCodeTargetInRepo(fallbackRepo, agentId, title) || fallback[1];
+    return [fallbackRepo.id, fallbackFile];
+  }
+  return fallback;
+}
+
+function bestCodeTargetInRepo(repo, agentId, title = "") {
+  if (!repo?.files) return "";
+  const files = Object.keys(repo.files);
+  if (!files.length) return "";
+  const lowerTitle = String(title || "").toLowerCase();
+  const scoreFile = (file) => {
+    const lower = file.toLowerCase();
+    const ext = lower.split(".").pop() || "";
+    let score = 0;
+    if (/^(\.idea|\.git|node_modules|dist|build|__pycache__)\//.test(lower)) return -100;
+    if (/^(\.gitignore|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(lower)) return -80;
+    if (/connector_sender|allow_quantumflow|workspace\.xml|modules\.xml|inspectionprofiles/.test(lower)) return -70;
+    if (/^(quantumflow-mvp|server\.py|storage\.py|codex_project_index)/.test(lower)) score -= 30;
+    if (file === activeFileName) score += 1;
+    if (lowerTitle && lowerTitle.split(/\s+|\/|,|，/).some((token) => token.length > 2 && lower.includes(token))) score += 3;
+    if (agentId === "frontend") {
+      if (["vue", "tsx", "jsx", "js", "ts", "html", "css"].includes(ext)) score += 4;
+      if (lower.includes("frontend/") || lower.includes("ui/") || lower.includes("src/") || lower.includes("app.") || lower.includes("index.") || lower.includes("style")) score += 3;
+      if (lower.includes("test") || lower.includes("spec") || lower.includes("api") || lower.includes("server")) score -= 4;
+    } else if (agentId === "backend") {
+      if (["py", "go", "rs", "java"].includes(ext)) score += 4;
+      if (["ts", "js"].includes(ext)) score += lower.includes("backend/") || lower.includes("server") || lower.includes("api") ? 3 : 0;
+      if (lower.includes("backend/") || lower.includes("server") || lower.includes("api") || lower.includes("route") || lower.includes("connector") || lower.endsWith("main.py")) score += 5;
+      if (lower.includes("frontend/") || lower.includes("src/") || lower.includes("style") || lower.endsWith(".css") || lower.endsWith(".html") || lower.endsWith("main.js")) score -= 6;
+    } else if (agentId === "tester") {
+      if (lower.includes("tests/") || lower.includes("test") || lower.includes("spec") || lower.includes("__tests__")) score += 7;
+      if (["py", "js", "ts"].includes(ext)) score += 2;
+      if (lower.includes("readme") || lower.includes("review") || lower.endsWith("main.js")) score -= 5;
+    } else if (agentId === "reviewer") {
+      if (lower.includes("review") || lower.includes("checklist") || lower.includes("readme") || lower.includes("docs/") || lower.includes(".quantumflow/")) score += 6;
+      if (["md", "txt"].includes(ext)) score += 2;
+      if (lower.includes("test") || lower.includes("spec") || lower.endsWith("main.js")) score -= 4;
+    }
+    return score;
+  };
+  const best = files
+    .map((file) => ({ file, score: scoreFile(file) }))
+    .sort((a, b) => b.score - a.score || a.file.localeCompare(b.file))[0];
+  const minimumScore = agentId === "frontend" ? 4 : agentId === "backend" ? 5 : 6;
+  return best?.score >= minimumScore ? best.file : defaultCodeFileForAgent(repo, agentId);
+}
+
+function defaultCodeFileForAgent(repo, agentId) {
+  const files = Object.keys(repo?.files || {});
+  const existing = (patterns) => files.find((file) => patterns.some((pattern) => pattern.test(file.toLowerCase())));
+  if (agentId === "frontend") return existing([/app\/static\/app\.js$/, /frontend\//, /src\/.*\.(vue|js|ts|jsx|tsx|css)$/, /index\.html$/]) || "app/static/app.js";
+  if (agentId === "backend") return existing([/app\/main\.py$/, /backend\//, /server\.(py|js|ts)$/, /api\//, /routes?\//]) || "app/main.py";
+  if (agentId === "tester") return existing([/tests?\//, /(test|spec)\.(py|js|ts)$/]) || "tests/test_smoke.py";
+  if (agentId === "reviewer") return existing([/review/, /checklist/, /docs\//]) || "docs/review-checklist.md";
+  return files[0] || "README.md";
 }
 
 function focusAgentCodeTarget(agentId, title = "") {
   const [repoId, fileName] = codeTargetForAgent(agentId, title);
   activeRepoId = repoId;
   activeFileName = fileName;
+  ensureRepoFileForAgent(repoId, fileName, agentId, title);
   renderCommunity();
+}
+
+function ensureRepoFileForAgent(repoId, fileName, agentId, title = "") {
+  const repo = openWorldRepos.find((item) => item.id === repoId);
+  if (!repo || repo.files[fileName]) return;
+  const kind = agentId === "tester" ? "test" : agentId === "reviewer" ? "doc" : "code";
+  repo.files[fileName] = templateForNewRepoFile(fileName, kind, title || `${agentById(agentId)?.name || agentId} 负责文件`, agentId);
+  repo.custom = true;
+  saveCustomInternalRepos();
 }
 
 function stationForOwner(ownerId) {
@@ -1743,12 +1853,13 @@ function stationForOwner(ownerId) {
   }[ownerId] || [520, 160];
 }
 
-function createReviewerAssignedTasks(title, ownerIds) {
+function createReviewerAssignedTasks(title, ownerIds, requirementDoc = null) {
   const workflowId = `wf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  const createdTasks = [];
   ownerIds.forEach((ownerId) => {
     const owner = agentById(ownerId);
     if (!owner) return;
-    tasks.push({
+    const task = {
       id: `local-${localWorkflowTaskSeq++}`,
       localWorkflowId: `${workflowId}-${ownerId}`,
       workflowId,
@@ -1759,11 +1870,15 @@ function createReviewerAssignedTasks(title, ownerIds) {
       status: "assigned",
       source: "reviewer_dispatch",
       requiresReview: true,
-    });
+      requirementDoc,
+    };
+    tasks.push(task);
+    createdTasks.push(task);
     setAgent(ownerId, { status: "idle" });
   });
   backendQueueStats = { ...backendQueueStats, pending: tasks.filter((task) => task.status === "pending" || task.status === "assigned").length, running_total: tasks.filter((task) => task.status !== "done" && task.status !== "delivered").length };
   renderAll();
+  return createdTasks;
 }
 
 function dispatchReviewerTask(taskKey = "") {
@@ -1781,31 +1896,52 @@ function dispatchReviewerTask(taskKey = "") {
     if (note) note.textContent = "这条任务没有定向执行 Agent，请团队负责人重新发起。";
     return;
   }
-  createReviewerAssignedTasks(title, owners);
+  const createdTasks = createReviewerAssignedTasks(title, owners, intakeTask.requirementDoc || null);
   tasks = tasks.filter((task) => task !== intakeTask);
   setAgent("reviewer", { status: "done" });
   const ownerNames = owners.map((id) => agentById(id)?.name || id).join("、");
-  addLog(`代码负责人已接收任务并定向启动 ${ownerNames}：${title}`, "代码审查者");
-  pushComment("代码审查者", `已接收团队负责人转交任务，按定向目标通知 ${ownerNames} 接受执行：${title}`);
+  addLog(`代码负责人已接收 ${intakeTask.requirementDoc?.id || "技术书"} 并一键执行 ${ownerNames}：${title}`, "代码审查者");
+  pushComment("代码审查者", `已按团队负责人技术书一键启动 ${ownerNames}：${title}`);
   selectedReviewerIntakeKey = "";
-  if (note) note.textContent = `已通知 ${ownerNames}，等待他们接受任务。`;
+  createdTasks.forEach((task, index) => {
+    window.setTimeout(() => startWorkerTaskFromReviewer(task), index * 320);
+  });
+  if (note) note.textContent = `已一键启动 ${ownerNames}，正在写入各自职责文件。`;
   renderAll();
+  window.setTimeout(() => openReviewerDispatchPanel(agentById("reviewer")), createdTasks.length * 360 + 80);
 }
 
 function findWorkflowTask(taskKey) {
   return tasks.find((task) => String(task.localWorkflowId || task.id) === String(taskKey));
 }
 
-function acceptWorkerTask(taskKey) {
-  const task = findWorkflowTask(taskKey);
-  if (!task) return;
+function startWorkerTaskFromReviewer(task, options = {}) {
   const owner = agentById(task.owner);
-  task.status = "pending";
-  addLog(`${owner.name} 已接受任务：${task.workflowTitle || task.title}`, owner.name);
-  pushComment(owner.name, `已接受任务，开始执行：${task.workflowTitle || task.title}`);
-  const index = tasks.indexOf(task);
-  closeAgentQuickPanel();
-  runTask(index, { local: true });
+  if (!owner) return;
+  task.status = "active";
+  selectedAgentId = owner.id;
+  addLog(`${owner.name} 已由代码负责人启动：${task.workflowTitle || task.title}`, owner.name);
+  pushComment(owner.name, `代码负责人已启动我，按技术书开始写入对应代码：${task.workflowTitle || task.title}`);
+  if (options.openCode) closeAgentQuickPanel();
+  focusAgentCodeTarget(owner.id, task.workflowTitle || task.title || "");
+  const targetRepoId = activeRepoId;
+  const targetFileName = activeFileName;
+  if (options.openCode) {
+    switchView("community");
+    switchOpenWorldPanel("codePanel");
+  }
+  setAgent(owner.id, { status: "working", x: task.station?.[0] || owner.x, y: task.station?.[1] || owner.y });
+  writeTaskCompletionCode(task, owner);
+  renderAll();
+  window.setTimeout(() => {
+    if (task.status !== "active") return;
+    task.status = "review";
+    setAgent(owner.id, { status: "done", x: owner.home[0], y: owner.home[1] });
+    setAgent("reviewer", { status: "idle", x: agentById("reviewer").home[0], y: agentById("reviewer").home[1] });
+    addLog(`代码写入完成，等待 Reviewer 审核：${task.workflowTitle || task.title}`, owner.name);
+    pushComment(owner.name, `代码已写入 ${targetRepoId}/${targetFileName}，提交给代码负责人审核。`);
+    renderAll();
+  }, 4200);
 }
 
 function approveReviewerPackage() {
@@ -1857,12 +1993,8 @@ function jumpAgentToCodeArea(agent) {
   if (!agent) return;
   const activeTask = tasks.find((item) => item.owner === agent.id && ["active", "blocked", "pending", "assigned", "review", "done"].includes(item.status));
   focusAgentCodeTarget(agent.id, activeTask?.workflowTitle || activeTask?.title || "");
-  switchView("community");
-  switchOpenWorldPanel("codePanel");
-  switchCodingMode("manual");
-  renderCommunity();
-  window.setTimeout(() => els.manualCodeEditor?.focus(), 0);
-  pushComment(agent.name, `已打开 ${activeFileName} 的完整代码编辑器。`);
+  openAutoCodeWorkspace(activeRepoId, activeFileName);
+  pushComment(agent.name, `已打开 ${activeFileName} 的自动编码工作区，Agent 会基于当前任务继续生成代码。`);
 }
 
 function openCoderStudio(agent) {
@@ -1946,16 +2078,47 @@ function renderTasks() {
           <span>${agentById(task.owner).name} / ${task.source || "desktop"}</span>
           <span>${task.status}</span>
         </div>
+        ${
+          task.requirementDoc
+            ? `<div class="task-requirement-chip"><span>${escapeHtml(task.requirementDoc.id)}</span><em>${escapeHtml(task.reviewerIntake ? `交给代码负责人 / ${directedOwnersText(task.suggestedOwners)}` : `按技术书执行 / ${agentById(task.owner)?.name || task.owner}`)}</em></div>`
+            : ""
+        }
       </div>
     `,
     )
     .join("");
   document.querySelectorAll(".task-item").forEach((node) => {
-    node.addEventListener("click", () => runTask(Number(node.dataset.task)));
+    node.addEventListener("click", () => openTaskFromQueue(Number(node.dataset.task)));
   });
   bindProjectDeliveryActions();
   renderRuntimeEnvironment();
   renderCommunity();
+}
+
+function openTaskFromQueue(index) {
+  const task = tasks[index];
+  if (!task) return;
+  const owner = agentById(task.owner);
+  if (!owner) return;
+  selectedAgentId = owner.id;
+  if (task.reviewerIntake) {
+    selectedReviewerIntakeKey = String(task.localWorkflowId || task.id);
+    openReviewerDispatchPanel(agentById("reviewer"));
+    return;
+  }
+  if (task.status === "assigned" || task.status === "pending") {
+    focusAgentCodeTarget(owner.id, task.workflowTitle || task.title || "");
+    switchView("community");
+    switchOpenWorldPanel("codePanel");
+    return;
+  }
+  if (task.status === "active" || task.status === "review") {
+    focusAgentCodeTarget(owner.id, task.workflowTitle || task.title || "");
+    switchView("community");
+    switchOpenWorldPanel("codePanel");
+    return;
+  }
+  openAgentQuickPanel(owner);
 }
 
 function bindProjectDeliveryActions() {
@@ -2044,6 +2207,7 @@ function renderRuntimeEnvironment() {
   };
   if (!els.runtimeProjectTitle) {
     setPreview("");
+    renderRuntimeRepoTester();
     return;
   }
   if (!delivery) {
@@ -2054,6 +2218,7 @@ function renderRuntimeEnvironment() {
     [els.runtimeProjectTestBtn, els.runtimeProjectOpenBtn, els.runtimeProjectFixBtn].forEach((button) => {
       if (button) button.disabled = true;
     });
+    renderRuntimeRepoTester();
     return;
   }
   setActiveRuntimeDelivery(delivery.id);
@@ -2068,6 +2233,335 @@ function renderRuntimeEnvironment() {
   if (els.runtimeProjectTestBtn) els.runtimeProjectTestBtn.disabled = deliveryTestStates[delivery.id] === "testing";
   if (els.runtimeProjectOpenBtn) els.runtimeProjectOpenBtn.disabled = false;
   if (els.runtimeProjectFixBtn) els.runtimeProjectFixBtn.disabled = false;
+  renderRuntimeRepoTester();
+}
+
+function getActiveRuntimeRepo() {
+  return openWorldRepos.find((repo) => repo.id === activeRuntimeRepoId) || openWorldRepos.find((repo) => repo.id === activeRepoId) || openWorldRepos[0];
+}
+
+function setActiveRuntimeRepo(repoId) {
+  if (!repoId) return;
+  activeRuntimeRepoId = String(repoId);
+  localStorage.setItem("qfActiveRuntimeRepoId", activeRuntimeRepoId);
+}
+
+function renderRuntimeRepoTester() {
+  if (!els.runtimeRepoSelect || !els.runtimeRepoTestOutput) return;
+  const repos = openWorldRepos.filter((repo) => repo && repo.files);
+  const activeRepo = getActiveRuntimeRepo();
+  els.runtimeRepoSelect.innerHTML = repos
+    .map((repo) => `<option value="${escapeHtml(repo.id)}" ${repo.id === activeRepo?.id ? "selected" : ""}>${escapeHtml(repo.name)} / ${escapeHtml(repo.lang || "Code")}</option>`)
+    .join("");
+  if (activeRepo) setActiveRuntimeRepo(activeRepo.id);
+  const state = activeRepo ? runtimeRepoTestStates[activeRepo.id] : null;
+  if (!activeRepo) {
+    els.runtimeRepoTestOutput.textContent = "暂无可测试仓库。";
+    [els.runtimeRepoTestBtn, els.runtimeRepoPreviewBtn, els.runtimeRepoOpenCodeBtn].forEach((button) => {
+      if (button) button.disabled = true;
+    });
+    return;
+  }
+  if (els.runtimeRepoTestBtn) els.runtimeRepoTestBtn.disabled = state?.status === "testing";
+  if (els.runtimeRepoPreviewBtn) els.runtimeRepoPreviewBtn.disabled = false;
+  if (els.runtimeRepoOpenCodeBtn) els.runtimeRepoOpenCodeBtn.disabled = false;
+  els.runtimeRepoTestOutput.innerHTML = renderRuntimeRepoTestOutput(activeRepo, state);
+}
+
+function renderRuntimeRepoTestOutput(repo, state) {
+  if (!state) {
+    return escapeHtml(`${repo.name} 已选中。点击“测试运行”检查入口文件、测试文件、README、编码和运行脚本。`);
+  }
+  const statusText = state.status === "passed" ? "通过" : state.status === "testing" ? "测试中" : "发现问题";
+  const issueMarkup = state.issues?.length
+    ? `<ul>${state.issues.map((issue) => `<li>${escapeHtml(issue)}</li>`).join("")}</ul>`
+    : "<p>未发现阻塞运行的问题。</p>";
+  return `
+    <strong>${escapeHtml(repo.name)} / ${escapeHtml(statusText)}</strong>
+    ${issueMarkup}
+    <em>${escapeHtml(state.summary || "")}</em>
+  `;
+}
+
+function testRuntimeRepo(repoId = activeRuntimeRepoId) {
+  const repo = openWorldRepos.find((item) => item.id === repoId) || getActiveRuntimeRepo();
+  if (!repo) return;
+  setActiveRuntimeRepo(repo.id);
+  runtimeRepoTestStates[repo.id] = { status: "testing", summary: "正在检查仓库运行入口和测试问题...", issues: [] };
+  renderRuntimeRepoTester();
+  window.setTimeout(() => {
+    const result = inspectRepoRuntimeIssues(repo);
+    runtimeRepoTestStates[repo.id] = result;
+    addLog(result.status === "passed" ? `仓库测试通过：${repo.name}` : `仓库测试发现问题：${repo.name}`, "Tester");
+    pushComment("测试 Agent", result.summary, result.status === "passed" ? "suggestion" : "issue", `${repo.id}/runtime-test`);
+    renderRuntimeRepoTester();
+  }, 260);
+}
+
+function inspectRepoRuntimeIssues(repo) {
+  const files = Object.keys(repo.files || {});
+  const joined = files.map((file) => `${file}\n${(repo.files[file] || []).join("\n")}`).join("\n\n");
+  const lowerFiles = files.map((file) => file.toLowerCase());
+  const issues = [];
+  const hasPackageJson = lowerFiles.includes("package.json");
+  const hasFrontendEntry = lowerFiles.some((file) => /(^|\/)(src\/main\.(js|ts)|src\/app\.vue|index\.html|app\/static\/app\.js)$/.test(file));
+  const hasBackendEntry = lowerFiles.some((file) => /(^|\/)(app\/main\.py|main\.py|server\.py|runtime\/server\.py)$/.test(file));
+  const hasTestFile = lowerFiles.some((file) => /(test|spec).*\.(js|ts|py)$/.test(file) || /tests?\//.test(file));
+  const hasReadme = lowerFiles.some((file) => file === "readme.md");
+  if (!hasFrontendEntry && !hasBackendEntry) issues.push("缺少可识别的前端或后端运行入口。");
+  if (hasPackageJson && !/"scripts"\s*:\s*\{[\s\S]*"(dev|start|test)"/.test(joined)) issues.push("package.json 没有 dev/start/test 脚本。");
+  if (!hasPackageJson && hasFrontendEntry && !hasBackendEntry && !lowerFiles.includes("app/static/app.js")) issues.push("前端项目缺少 package.json，无法判断如何启动。");
+  if (!hasTestFile) issues.push("缺少测试文件，Tester 无法做自动验收。");
+  if (!hasReadme) issues.push("缺少 README.md，运行方式和验收口径不清楚。");
+  if (looksLikeBrokenEncoding(joined)) issues.push("检测到乱码或编码异常，需要重新保存为 UTF-8。");
+  const status = issues.length ? "failed" : "passed";
+  return {
+    status,
+    issues,
+    summary: status === "passed"
+      ? "运行门禁通过：入口文件、测试文件、README、脚本和编码检查可用。"
+      : `运行门禁未通过：发现 ${issues.length} 个问题，建议先在代码区修复后再运行。`,
+  };
+}
+
+function openRuntimeRepoInCode() {
+  const repo = getActiveRuntimeRepo();
+  if (!repo) return;
+  const firstFile = Object.keys(repo.files || {})[0] || "";
+  openAutoCodeWorkspace(repo.id, firstFile);
+}
+
+function previewRuntimeRepo(repoId = activeRuntimeRepoId) {
+  const repo = openWorldRepos.find((item) => item.id === repoId) || getActiveRuntimeRepo();
+  if (!repo || !els.runtimeProjectFrame) return;
+  setActiveRuntimeRepo(repo.id);
+  const check = inspectRepoRuntimeIssues(repo);
+  const preview = buildRuntimeRepoPreview(repo);
+  els.runtimeProjectFrame.removeAttribute("src");
+  els.runtimeProjectFrame.srcdoc = preview.html;
+  els.runtimeProjectFrame.classList.add("active");
+  els.runtimePreviewEmpty?.classList.add("hidden", "is-hidden");
+  if (els.runtimePreviewAddress) els.runtimePreviewAddress.textContent = `repo://${repo.name}/${preview.source}`;
+  runtimeRepoTestStates[repo.id] = {
+    status: check.status === "passed" ? "passed" : "preview",
+    summary: `已启动仓库预览：${preview.source}。${check.issues.length ? `仍有 ${check.issues.length} 个非阻塞检查项。` : "入口检查通过。"}`,
+    issues: check.issues,
+  };
+  renderRuntimeRepoTester();
+}
+
+function buildRuntimeRepoPreview(repo) {
+  const files = repo.files || {};
+  const fileText = (name) => (files[name] || []).join("\n");
+  if (files["index.html"]) {
+    return {
+      source: "index.html",
+      html: ensureRuntimeHtmlDocument(fileText("index.html"), repo.name),
+    };
+  }
+  if (files["src/App.vue"]) {
+    const vue = fileText("src/App.vue");
+    const template = vue.match(/<template[^>]*>([\s\S]*?)<\/template>/i)?.[1] || "<main><h1>Vue 项目预览</h1><p>未找到 template。</p></main>";
+    const style = [
+      vue.match(/<style[^>]*>([\s\S]*?)<\/style>/i)?.[1] || "",
+      fileText("src/style.css"),
+    ].filter(Boolean).join("\n");
+    return {
+      source: "src/App.vue",
+      html: wrapRuntimePreviewHtml(repo.name, template, style),
+    };
+  }
+  if (files["app/static/app.js"]) {
+    return {
+      source: "app/static/app.js",
+      html: wrapRuntimePreviewHtml(
+        repo.name,
+        '<div id="app"></div>',
+        runtimeBusinessPreviewStyle(),
+        `<script>${fileText("app/static/app.js")}<\/script>`,
+      ),
+    };
+  }
+  const scriptEntry = findRuntimeScriptEntry(files);
+  if (scriptEntry) {
+    return {
+      source: scriptEntry,
+      html: buildRuntimeCodePreview(repo, scriptEntry),
+    };
+  }
+  const readmeName = Object.keys(files).find((file) => file.toLowerCase() === "readme.md");
+  if (readmeName) {
+    return {
+      source: readmeName,
+      html: buildRuntimeDocumentPreview(repo, readmeName),
+    };
+  }
+  const firstReadable = Object.keys(files).find((file) => /\.(md|txt|js|ts|py|json|html|css|vue)$/i.test(file));
+  if (firstReadable) {
+    return {
+      source: firstReadable,
+      html: buildRuntimeDocumentPreview(repo, firstReadable),
+    };
+  }
+  return {
+    source: "runtime-check",
+    html: buildRuntimeEmptyPreview(repo),
+  };
+}
+
+function ensureRuntimeHtmlDocument(html = "", title = "项目预览") {
+  if (/<!doctype|<html[\s>]/i.test(html)) return html;
+  return wrapRuntimePreviewHtml(title, html || "<main></main>", "");
+}
+
+function findRuntimeScriptEntry(files = {}) {
+  const names = Object.keys(files);
+  const preferred = [
+    "src/main.js",
+    "src/index.js",
+    "renderer.js",
+    "src/renderer.js",
+    "main.js",
+    "app.js",
+    "runtime-check.js",
+  ];
+  return preferred.find((name) => files[name]) || names.find((name) => /(^|\/)(main|app|renderer|index)\.(js|ts)$/i.test(name));
+}
+
+function runtimeFileContent(files = {}, name = "") {
+  return normalizeDisplayLines(files[name] || [], name).join("\n");
+}
+
+function buildRuntimeCodePreview(repo, entryName) {
+  const files = repo.files || {};
+  const related = [entryName, "README.md", "package.json"]
+    .filter((name, index, list) => files[name] && list.indexOf(name) === index);
+  const cards = related.map((name) => runtimeFilePreviewCard(name, runtimeFileContent(files, name))).join("");
+  return wrapRuntimePreviewHtml(
+    repo.name,
+    `<main class="runtime-readable-preview">
+      <section class="runtime-readable-hero">
+        <span>Repository Preview</span>
+        <h1>${escapeHtml(repo.name)}</h1>
+        <p>没有发现可直接挂载的网页入口，已切换为代码可读预览。先看入口文件，再进入代码区继续补业务 UI。</p>
+      </section>
+      <section class="runtime-readable-grid">${cards}</section>
+    </main>`,
+    runtimeReadablePreviewStyle(),
+  );
+}
+
+function buildRuntimeDocumentPreview(repo, fileName) {
+  const files = repo.files || {};
+  const primary = runtimeFilePreviewCard(fileName, runtimeFileContent(files, fileName), true);
+  const extras = Object.keys(files)
+    .filter((name) => name !== fileName && /\.(js|ts|py|json|md|txt|html|css|vue)$/i.test(name))
+    .slice(0, 4)
+    .map((name) => runtimeFilePreviewCard(name, runtimeFileContent(files, name)))
+    .join("");
+  return wrapRuntimePreviewHtml(
+    repo.name,
+    `<main class="runtime-readable-preview">
+      <section class="runtime-readable-hero">
+        <span>Document Preview</span>
+        <h1>${escapeHtml(repo.name)}</h1>
+        <p>当前仓库暂未提供可直接运行的网页入口，先用 UTF-8 文本方式展示仓库内容，避免 Markdown/文档被当 HTML 解析成乱码。</p>
+      </section>
+      <section class="runtime-readable-grid">${primary}${extras}</section>
+    </main>`,
+    runtimeReadablePreviewStyle(),
+  );
+}
+
+function buildRuntimeEmptyPreview(repo) {
+  const files = Object.keys(repo.files || {});
+  const list = files.length ? files.slice(0, 8).map((file) => `<li>${escapeHtml(file)}</li>`).join("") : "<li>当前仓库还没有文件</li>";
+  return wrapRuntimePreviewHtml(
+    repo.name,
+    `<main class="runtime-readable-preview">
+      <section class="runtime-readable-hero">
+        <span>Runtime Check</span>
+        <h1>暂无可运行入口</h1>
+        <p>请补充 index.html、src/App.vue、app/static/app.js，或至少添加 README/代码文件用于预览。</p>
+      </section>
+      <section class="runtime-readable-card"><h2>当前文件</h2><ul>${list}</ul></section>
+    </main>`,
+    runtimeReadablePreviewStyle(),
+  );
+}
+
+function runtimeFilePreviewCard(name, content, primary = false) {
+  const safeContent = content.trim() || "这个文件目前没有内容。";
+  return `<article class="runtime-readable-card ${primary ? "primary" : ""}">
+    <div><span>${escapeHtml(name)}</span><strong>${escapeHtml(fileKindLabel(name))}</strong></div>
+    <pre>${escapeHtml(safeContent)}</pre>
+  </article>`;
+}
+
+function fileKindLabel(name = "") {
+  if (/readme|\.md$/i.test(name)) return "文档";
+  if (/package\.json$/i.test(name)) return "配置";
+  if (/\.(js|ts|vue)$/i.test(name)) return "前端 / 脚本";
+  if (/\.py$/i.test(name)) return "后端 / 脚本";
+  if (/\.css$/i.test(name)) return "样式";
+  return "文件";
+}
+
+function runtimeReadablePreviewStyle() {
+  return `
+    body { background: #eef2f7; color: #162033; }
+    .runtime-readable-preview { display: grid; gap: 16px; width: min(1180px, calc(100% - 48px)); margin: 0 auto; padding: 28px 0 40px; }
+    .runtime-readable-hero, .runtime-readable-card { border: 1px solid #ccd7e6; border-radius: 10px; background: #fff; box-shadow: 0 16px 34px rgba(31, 45, 70, .08); }
+    .runtime-readable-hero { padding: 22px 24px; }
+    .runtime-readable-hero span, .runtime-readable-card span { color: #0f8f72; font-size: 12px; font-weight: 900; text-transform: uppercase; }
+    .runtime-readable-hero h1 { margin: 8px 0 8px; font-size: 30px; }
+    .runtime-readable-hero p { margin: 0; color: #58657a; line-height: 1.7; }
+    .runtime-readable-grid { display: grid; gap: 14px; }
+    .runtime-readable-card { display: grid; gap: 12px; padding: 16px; }
+    .runtime-readable-card.primary { border-color: #54bfa7; }
+    .runtime-readable-card div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .runtime-readable-card strong { color: #53627a; font-size: 13px; }
+    .runtime-readable-card pre { margin: 0; max-height: 360px; overflow: auto; border: 1px solid #d8e0eb; border-radius: 8px; background: #f8fafc; color: #162033; padding: 14px; font: 13px/1.65 Consolas, "SFMono-Regular", "Microsoft YaHei", monospace; white-space: pre-wrap; word-break: break-word; }
+    .runtime-readable-card ul { margin: 0; padding-left: 20px; color: #58657a; line-height: 1.8; }
+  `;
+}
+
+function runtimeBusinessPreviewStyle() {
+  return `
+    .business-shell, .oa-shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100vh; background: #eef3f8; color: #172033; }
+    .business-shell aside, .oa-nav { background: #113451; color: #fff; padding: 18px 14px; display: grid; align-content: start; gap: 10px; }
+    .business-shell aside strong, .oa-nav strong { font-size: 18px; margin-bottom: 8px; }
+    .business-shell button, .oa-shell button { border: 1px solid #9db6ca; border-radius: 6px; background: #fff; color: #123; padding: 8px 10px; cursor: pointer; }
+    .business-shell aside button, .oa-nav button { background: #17496f; color: #e9f7ff; border-color: rgba(255,255,255,.18); text-align: left; }
+    .business-shell aside button.active, .oa-nav button.active { background: #1e88c8; }
+    .business-shell section, .oa-workbench { padding: 18px 22px; }
+    .business-shell header, .oa-workbench header { display: flex; justify-content: space-between; align-items: center; background: #fff; border: 1px solid #c7d6e2; padding: 14px 16px; margin-bottom: 14px; }
+    .business-shell h1, .oa-workbench h1 { margin: 0; font-size: 24px; }
+    .business-shell nav, .oa-status-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+    .business-shell nav button.active, .oa-status-tabs button.active { background: #1e88c8; color: #fff; }
+    .business-grid, .oa-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+    .business-grid article, .oa-grid article { background: #fff; border: 1px solid #c7d6e2; border-radius: 8px; padding: 14px; display: grid; gap: 8px; }
+    .business-grid strong, .oa-grid strong { font-size: 18px; }
+    .business-grid em, .oa-grid em { color: #0f7f5f; font-style: normal; font-weight: 800; }
+  `;
+}
+
+function wrapRuntimePreviewHtml(title, body, style = "", script = "") {
+  return `<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(title)}</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; background: #f6f8fb; color: #172033; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; }
+      main, #app { min-height: 100vh; }
+      ${style}
+    </style>
+  </head>
+  <body>${body}${script}</body>
+</html>`;
 }
 
 function testerFileForDelivery(delivery = {}) {
@@ -2188,7 +2682,7 @@ function openDeliveryRuntimeEnvironment(deliveryId) {
   switchView("runtimeEnvironment");
 }
 
-async function openProjectDeliveryRuntime(deliveryId) {
+async function openProjectDeliveryRuntime(deliveryId, options = {}) {
   if (!deliveryId) return;
   setActiveRuntimeDelivery(deliveryId);
   deliveryTestStates[`${deliveryId}:output`] = "正在启动项目 Web UI...";
@@ -2205,7 +2699,7 @@ async function openProjectDeliveryRuntime(deliveryId) {
     projectDeliveries = projectDeliveries.map((item) => (String(item.id) === String(deliveryId) ? { ...item, ...delivery, runtime_url: runtimeUrl } : item));
     renderTasks();
     renderRuntimeEnvironment();
-    if (runtimeUrl) {
+    if (runtimeUrl && options.openExternal !== false) {
       if (window.quantumflowDesktop?.openExternal) {
         await window.quantumflowDesktop.openExternal(runtimeUrl);
       } else {
@@ -2309,6 +2803,7 @@ function renderCommunity() {
   if (els.manualCodeEditor && !els.manualCodeEditor.classList.contains("active")) {
     els.manualCodeEditor.value = codeLines.join("\n");
   }
+  renderAutoAgentCodeTargets(activeRepo);
 
   const fallbackIssues = tasks
     .slice(-8)
@@ -2356,8 +2851,8 @@ function renderCommunity() {
       renderCommunity();
     });
   });
-  document.querySelectorAll("[data-repo-file-form]").forEach((form) => {
-    form.addEventListener("submit", createInternalRepoFile);
+  document.querySelectorAll("[data-repo-new-file]").forEach((button) => {
+    button.addEventListener("click", () => openInternalRepoFileCreateForm(button.dataset.repoNewFile));
   });
   document.querySelectorAll("[data-repo-clone]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2366,6 +2861,18 @@ function renderCommunity() {
     });
   });
   bindIssueActions();
+}
+
+function renderAutoAgentCodeTargets(repo) {
+  if (!repo) return;
+  document.querySelectorAll("[data-auto-agent]").forEach((button) => {
+    const agentId = button.dataset.autoAgent;
+    const target = bestCodeTargetInRepo(repo, agentId) || activeFileName;
+    const label = agentId === "frontend" ? "界面" : agentId === "backend" ? "接口" : agentId === "tester" ? "验收" : "Review";
+    const span = button.querySelector("span");
+    if (span) span.textContent = `${label} / ${target}`;
+    button.title = `在当前仓库打开 ${target}`;
+  });
 }
 
 function renderRepoDetail(repo) {
@@ -2381,14 +2888,15 @@ function renderRepoDetail(repo) {
       </div>
       <div class="repo-detail-actions">
         <button type="button" data-world-panel-target="codePanel">打开代码</button>
+        <button type="button" data-repo-new-file="${escapeHtml(repo.id)}">新建文件</button>
         <button type="button" data-repo-clone="${escapeHtml(repo.id)}">拉取</button>
       </div>
     </section>
     <div class="repo-detail-stats">
-      <article><strong>${escapeHtml(repo.lang)}</strong><span>主要语言</span></article>
+      <article><strong>${escapeHtml(repo.frontendLang || repo.lang || "-")}</strong><span>前端语言</span></article>
+      <article><strong>${escapeHtml(repo.backendLang || "-")}</strong><span>后端语言</span></article>
+      <article><strong>${escapeHtml(repo.database || "SQLite")}</strong><span>数据库</span></article>
       <article><strong>${files.length}</strong><span>文件</span></article>
-      <article><strong>${repo.stars || 0}</strong><span>Stars</span></article>
-      <article><strong>${relatedTasks.length}</strong><span>关联任务</span></article>
     </div>
     <section class="repo-file-preview">
       <div class="qf-panel-head"><h3>仓库文件</h3><span>点击文件会切到代码区查看</span></div>
@@ -2398,24 +2906,13 @@ function renderRepoDetail(repo) {
             (file) => `
           <button type="button" data-repo-open-file="${escapeHtml(file)}" data-repo-open-id="${escapeHtml(repo.id)}">
             <strong>${escapeHtml(file)}</strong>
-            <span>${escapeHtml((repo.files[file] || []).slice(0, 2).join(" / ") || "空文件")}</span>
+            <span>${escapeHtml(summarizeFilePreview(repo.files[file], file))}</span>
           </button>
         `,
           )
           .join("")}
       </div>
     </section>
-    <form class="repo-file-create-form" data-repo-file-form="${escapeHtml(repo.id)}">
-      <div class="repo-file-create-head">
-        <span>新增文件</span>
-        <strong>在当前仓库创建文件</strong>
-      </div>
-      <div class="repo-file-create-fields">
-        <label><span>文件路径</span><input name="fileName" type="text" placeholder="src/index.js / README.md" /></label>
-        <label><span>初始内容</span><textarea name="fileBody" placeholder="写一点初始代码或说明"></textarea></label>
-        <button type="submit">创建并打开</button>
-      </div>
-    </form>
   `;
 }
 
@@ -2426,46 +2923,206 @@ function createInternalRepo(event) {
   const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `repo-${Date.now().toString(36)}`;
   const uniqueId = openWorldRepos.some((repo) => repo.id === id) ? `${id}-${Date.now().toString(36).slice(-4)}` : id;
   const desc = els.repoCreateDesc?.value.trim() || "QuantumFlow 内部协作仓库";
-  const lang = els.repoCreateLang?.value.trim() || "Code";
+  const repoType = els.repoCreateType?.value || "fullstack";
+  const frontendLang = els.repoCreateFrontendLang?.value || "Vue 3";
+  const backendLang = els.repoCreateBackendLang?.value || "Python / FastAPI";
+  const database = els.repoCreateDatabase?.value || "SQLite";
+  const visibility = els.repoCreateVisibility?.value || "internal";
+  const template = els.repoCreateTemplate?.value || "readme";
+  const lang = [frontendLang !== "None" ? frontendLang : "", backendLang !== "None" ? backendLang : ""].filter(Boolean).join(" / ") || "Code";
+  const repoConfig = { name, type: repoType, frontendLang, backendLang, database, visibility, template, createdBy: currentUser?.username || "local" };
   openWorldRepos.unshift({
     id: uniqueId,
     name,
     desc,
     lang,
+    frontendLang,
+    backendLang,
+    database,
+    repoType,
+    visibility,
     stars: 0,
     custom: true,
-    files: {
-      "README.md": [`# ${name}`, "", desc],
-      ".quantumflow/repo.json": [`{"name":"${name}","lang":"${lang}","createdBy":"${currentUser?.username || "local"}"}`],
-    },
+    files: initialInternalRepoFiles(name, desc, repoConfig),
   });
   activeRepoId = uniqueId;
   activeFileName = "README.md";
   if (els.repoCreateName) els.repoCreateName.value = "";
   if (els.repoCreateDesc) els.repoCreateDesc.value = "";
-  if (els.repoCreateLang) els.repoCreateLang.value = "";
+  if (els.repoCreateType) els.repoCreateType.value = "fullstack";
+  if (els.repoCreateFrontendLang) els.repoCreateFrontendLang.value = "Vue 3";
+  if (els.repoCreateBackendLang) els.repoCreateBackendLang.value = "Python / FastAPI";
+  if (els.repoCreateDatabase) els.repoCreateDatabase.value = "SQLite";
+  if (els.repoCreateVisibility) els.repoCreateVisibility.value = "internal";
+  if (els.repoCreateTemplate) els.repoCreateTemplate.value = "readme";
   addLog(`新建内部仓库：${name}`, currentUser?.display_name || "你");
   saveCustomInternalRepos();
   switchOpenWorldPanel("repositoriesPanel");
   renderCommunity();
 }
 
+function initialInternalRepoFiles(name, desc, config) {
+  const files = {
+    "README.md": [
+      `# ${name}`,
+      "",
+      desc,
+      "",
+      "## 技术栈",
+      "",
+      `- 仓库类型：${config.type}`,
+      `- 前端语言：${config.frontendLang}`,
+      `- 后端语言：${config.backendLang}`,
+      `- 数据库：${config.database}`,
+      `- 可见性：${config.visibility}`,
+      "",
+      "## 目录说明",
+      "",
+      "- `frontend/`：前端页面、组件和样式。",
+      "- `backend/`：后端 API、服务和业务逻辑。",
+      "- `database/`：数据库迁移、种子数据和连接说明。",
+      "- `docs/`：需求、接口、验收和发布记录。",
+    ],
+    ".quantumflow/repo.json": [JSON.stringify(config, null, 2)],
+    "docs/requirements.md": ["# 需求说明", "", "- 目标用户：", "- 核心功能：", "- 验收标准："],
+  };
+  if (["fullstack", "frontend"].includes(config.template)) {
+    files["frontend/README.md"] = [`# ${config.frontendLang} 前端`, "", "这里放页面、组件、路由和样式。"];
+  }
+  if (["fullstack", "backend"].includes(config.template)) {
+    files["backend/README.md"] = [`# ${config.backendLang} 后端`, "", "这里放 API、服务、鉴权和任务处理逻辑。"];
+  }
+  if (config.database !== "None") {
+    files["database/README.md"] = [`# ${config.database} 数据库`, "", "默认使用当前 QuantumFlow 本地数据库方案。"];
+  }
+  if (config.template === "connector") {
+    files["connector/webhook.md"] = ["# Connector / Webhook", "", "- 事件入口：", "- 签名校验：", "- 回调响应："];
+  }
+  return files;
+}
+
+function slugForDeliveryRepo(value) {
+  const ascii = String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 42);
+  return ascii || `task-${Date.now().toString(36)}`;
+}
+
+function ensureAgentDeliveryRepo(task, plan = []) {
+  const key = taskDeliveryKey(task) || Date.now().toString(36);
+  const baseId = `agent-delivery-${slugForDeliveryRepo(`${task.title || task.workflowTitle || "task"}-${key}`)}`;
+  const existing = task.deliveryRepoId ? openWorldRepos.find((repo) => repo.id === task.deliveryRepoId) : openWorldRepos.find((repo) => repo.id === baseId);
+  if (existing) {
+    task.deliveryRepoId = existing.id;
+    const createdFiles = plan.filter((item) => ensureAgentDeliveryFile(existing, item.fileName, item.agent?.id || item.agentId || "master")).length;
+    if (createdFiles) saveCustomInternalRepos();
+    return existing;
+  }
+  const title = String(task.workflowTitle || task.title || "Agent 交付任务").trim();
+  const repo = {
+    id: openWorldRepos.some((item) => item.id === baseId) ? `${baseId}-${Date.now().toString(36).slice(-4)}` : baseId,
+    name: `agent-delivery-${slugForDeliveryRepo(title)}`,
+    desc: `自动编码任务交付仓库：${title}`,
+    lang: inferBusinessSpec(title).framework === "vue3" ? "Vue 3" : "Agent Code",
+    stars: 0,
+    custom: true,
+    delivery: true,
+    taskKey: key,
+    files: {
+      ".quantumflow/task.json": [
+        JSON.stringify(
+          {
+            task: title,
+            taskKey: key,
+            createdAt: new Date().toISOString(),
+            mode: "auto-code",
+          },
+          null,
+          2,
+        ),
+      ],
+    },
+  };
+  plan.forEach((item) => ensureAgentDeliveryFile(repo, item.fileName, item.agent?.id || item.agentId || "master"));
+  openWorldRepos.unshift(repo);
+  task.deliveryRepoId = repo.id;
+  saveCustomInternalRepos();
+  addLog(`自动编码已创建新仓库：${repo.name}`, "Repository");
+  pushComment("Repository", `已为任务《${title}》创建新仓库 ${repo.name}，接下来会先建文件再流式写代码。`, "suggestion", `${repo.id}/.quantumflow/task.json`);
+  return repo;
+}
+
+function ensureAgentDeliveryFile(repo, fileName, agentId = "master") {
+  if (!repo || !fileName || repo.files[fileName]) return false;
+  repo.files[fileName] = [`// ${agentById(agentId)?.name || agentId} 正在准备写入 ${fileName}`];
+  pushComment("Repository", `已在 ${repo.name} 创建文件：${fileName}`, "suggestion", `${repo.id}/${fileName}`);
+  return true;
+}
+
+function openAutoCodeWorkspace(repoId, fileName) {
+  if (repoId) activeRepoId = repoId;
+  if (fileName) activeFileName = fileName;
+  switchView("community");
+  switchOpenWorldPanel("codePanel");
+  switchCodingMode("auto");
+  renderCommunity();
+}
+
+function templateForNewRepoFile(fileName, kind, purpose, agentId) {
+  const agentName = agentById(agentId)?.name || agentId || "Agent";
+  const note = purpose || "TODO: 描述这个文件的职责。";
+  const ext = fileName.split(".").pop()?.toLowerCase() || "";
+  if (kind === "doc" || ext === "md") {
+    return [`# ${fileName}`, "", `> 负责人：${agentName}`, "", "## 用途", note, "", "## 待办", "- [ ] 补充详细说明", "- [ ] 关联任务或验收标准"];
+  }
+  if (kind === "test" || fileName.includes("test") || fileName.includes("spec")) {
+    if (ext === "py") {
+      return [`\"\"\"${note}\"\"\"`, "", "", "def test_placeholder():", "    assert True"];
+    }
+    return [`// ${note}`, `// Owner: ${agentName}`, "", "describe(\"new file\", () => {", "  it(\"has a placeholder test\", () => {", "    expect(true).toBe(true);", "  });", "});"];
+  }
+  if (kind === "config" || ["json", "yaml", "yml", "toml"].includes(ext)) {
+    if (ext === "json") return ["{", `  \"owner\": \"${agentName}\",`, `  \"purpose\": \"${note.replace(/"/g, "\\\"")}\"`, "}"];
+    return [`# Owner: ${agentName}`, `# Purpose: ${note}`, "enabled: true"];
+  }
+  if (ext === "py") {
+    return [`\"\"\"${note}\"\"\"`, "", "", "def main():", "    pass", "", "", "if __name__ == \"__main__\":", "    main()"];
+  }
+  if (["js", "ts", "jsx", "tsx"].includes(ext)) {
+    return [`// ${note}`, `// Owner: ${agentName}`, "", "export function run() {", "  return true;", "}"];
+  }
+  return [`// ${note}`, `// Owner: ${agentName}`, ""];
+}
+
 function createInternalRepoFile(event) {
   event.preventDefault();
-  const form = event.currentTarget;
-  const repo = openWorldRepos.find((item) => item.id === form.dataset.repoFileForm);
+  const repo = openWorldRepos.find((item) => item.id === activeRepoId);
   if (!repo) return;
-  const data = new FormData(form);
-  const fileName = String(data.get("fileName") || "").trim().replace(/\\/g, "/");
-  if (!fileName || fileName.includes("..")) return;
-  const fileBody = String(data.get("fileBody") || "").trim();
-  repo.files[fileName] = fileBody ? fileBody.split("\n") : [`// ${fileName}`, "// Created in QuantumFlow source civilization."];
+  const fileName = String(els.repoFileCreateName?.value || "").trim().replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!fileName || fileName.includes("..") || fileName.endsWith("/")) {
+    addLog("新建文件失败：请填写有效文件路径。", "Repository");
+    return;
+  }
+  if (repo.files[fileName]) {
+    addLog(`新建文件失败：${fileName} 已存在。`, "Repository");
+    return;
+  }
+  const kind = els.repoFileCreateKind?.value || "code";
+  const agentId = els.repoFileCreateAgent?.value || selectedAgentId || "frontend";
+  const purpose = els.repoFileCreatePurpose?.value.trim() || "";
+  const fileBody = els.repoFileCreateBody?.value.trim() || "";
+  const shouldOpenCode = els.repoFileCreateOpen?.checked !== false;
+  repo.files[fileName] = fileBody ? fileBody.split("\n") : templateForNewRepoFile(fileName, kind, purpose, agentId);
   repo.custom = true;
   activeRepoId = repo.id;
   activeFileName = fileName;
   saveCustomInternalRepos();
-  addLog(`仓库 ${repo.name} 新增文件：${fileName}`, currentUser?.display_name || "你");
-  switchOpenWorldPanel("codePanel");
+  addLog(`仓库 ${repo.name} 新增文件：${fileName}，交给 ${agentById(agentId)?.name || agentId} 维护`, currentUser?.display_name || "你");
+  els.repoFileCreateForm?.reset();
+  if (els.repoFileCreateOpen) els.repoFileCreateOpen.checked = true;
+  switchOpenWorldPanel(shouldOpenCode ? "codePanel" : "repositoriesPanel");
   renderCommunity();
 }
 
@@ -2582,7 +3239,7 @@ function codeForActiveFile(repo, fileName) {
 function renderCodeLines(lines, fileName = "") {
   const language = fileName.endsWith(".py") ? "python" : fileName.endsWith(".js") ? "javascript" : "plain";
   const activeKey = codeKey(activeRepoId, activeFileName);
-  return lines
+  return normalizeDisplayLines(lines, fileName)
     .map((line, index) => {
       const lineNumber = String(index + 1).padStart(2, "0");
       const streaming = streamingCodeKey === activeKey && streamingCodeLineIndex === index;
@@ -2592,7 +3249,7 @@ function renderCodeLines(lines, fileName = "") {
 }
 
 function highlightCode(line, language) {
-  const text = String(line ?? "");
+  const text = normalizeDisplayText(line);
   if (!text) return "&nbsp;";
   const tokenPattern = /(\/\/.*|#.*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b\d+(?:\.\d+)?\b|\b[A-Za-z_][\w]*\b)/g;
   const pythonKeywords = new Set(["from", "import", "class", "def", "return", "with", "as", "if", "else", "elif", "for", "while", "try", "except", "None", "True", "False", "async", "await", "in", "and", "or", "not"]);
@@ -2617,6 +3274,66 @@ function highlightCode(line, language) {
   }
   html += escapeHtml(text.slice(cursor));
   return html || "&nbsp;";
+}
+
+function summarizeFilePreview(lines, fileName = "") {
+  const previewLines = normalizeDisplayLines(lines || [], fileName).filter((line) => String(line).trim()).slice(0, 2);
+  return previewLines.join(" / ") || "空文件";
+}
+
+function normalizeDisplayLines(lines, fileName = "") {
+  const source = Array.isArray(lines) ? lines : String(lines || "").split("\n");
+  return source.map((line) => normalizeDisplayText(line, fileName));
+}
+
+function normalizeDisplayText(value, fileName = "") {
+  const text = String(value ?? "");
+  if (!text) return "";
+  const repaired = repairLatin1Mojibake(text);
+  if (!looksLikeBrokenEncoding(repaired)) return repaired;
+  if (isMarkdownLikeFile(fileName) && countBrokenEncodingChars(repaired) >= 2) return encodingFallbackText(fileName);
+  const cleaned = repaired.replace(/[\uFFFD\u25A1]+/g, "").replace(/\s{2,}/g, " ").trim();
+  if (cleaned && !looksLikeBrokenEncoding(cleaned)) return cleaned;
+  return encodingFallbackText(fileName);
+}
+
+function looksLikeBrokenEncoding(text) {
+  const value = String(text || "");
+  if (!value) return false;
+  const brokenChars = countBrokenEncodingChars(value);
+  if (brokenChars >= 2) return true;
+  return brokenChars > 0 && brokenChars / Math.max(value.length, 1) > 0.02;
+}
+
+function countBrokenEncodingChars(text) {
+  return (String(text || "").match(/[\uFFFD\u25A1]/g) || []).length;
+}
+
+function isMarkdownLikeFile(fileName = "") {
+  return /\.(md|markdown|txt)$/i.test(fileName);
+}
+
+function encodingFallbackText(fileName = "") {
+  return isMarkdownLikeFile(fileName)
+    ? "中文内容编码异常，已隐藏乱码；请重新生成或保存为 UTF-8。"
+    : "内容编码异常，已隐藏乱码。";
+}
+
+function repairLatin1Mojibake(text) {
+  const value = String(text || "");
+  if (!/[ÃÂâ]/.test(value)) return value;
+  try {
+    const bytes = Uint8Array.from([...value].map((char) => char.charCodeAt(0) & 0xff));
+    const decoded = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    return scoreBrokenEncoding(decoded) <= scoreBrokenEncoding(value) ? decoded : value;
+  } catch {
+    return value;
+  }
+}
+
+function scoreBrokenEncoding(text) {
+  const value = String(text || "");
+  return (value.match(/[\uFFFD\u25A1ÃÂâ]/g) || []).length;
 }
 
 function runCaptainInternalElection() {
@@ -3015,11 +3732,11 @@ function handleOpenSourceAction(action) {
     const issue = { id: `ISS-${Date.now().toString(36).toUpperCase()}`, title: `代码任务：${shortTitle}`, status: "coding", owner: "Master Agent", understanding: [] };
     publicWorldState.issues.unshift(issue);
     selectedPublicIssueId = issue.id;
-    pushPublicFeed("你", `编写代码：${shortTitle}`, "已切换到源文明手动编码，可以直接修改代码或使用补全代码。", "Code / manual");
+    pushPublicFeed("你", `编写代码：${shortTitle}`, "已切换到自动编码工作区，Agent 会先创建交付仓库和文件，再开始流式写代码。", "Code / auto");
     switchView("community");
     switchOpenWorldPanel("codePanel");
     if (els.autoCodeInput) els.autoCodeInput.value = text;
-    switchCodingMode("manual");
+    switchCodingMode("auto");
   } else if (action === "pull") {
     const nextId = 22 + publicWorldState.pulls.length;
     const pull = { id: `PR-${nextId}`, title: `#${nextId} ${shortTitle}`, status: "draft", owner: "Reviewer Agent", branch: shortTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 32) || "public-change", agentRuns: [] };
@@ -3367,6 +4084,15 @@ function switchCodingMode(mode) {
 async function completeManualCode() {
   if (!els.manualCodeEditor) return;
   const title = els.autoCodeInput?.value.trim() || publicWorldText?.() || "完善当前功能";
+  const fullLines = completeCurrentFileLines(title);
+  if (fullLines.length) {
+    els.manualCodeEditor.value = `${fullLines.join("\n")}\n`;
+    els.manualCodeEditor.focus();
+    els.manualCodeEditor.scrollTop = 0;
+    if (els.manualEditState) els.manualEditState.textContent = "local full completion / ready";
+    pushComment("Agent 编排控制台", `已补全 ${activeFileName} 的完整代码，保存后进入 Review。`, "suggestion", codeKey());
+    return;
+  }
   if (els.llmPluginPrompt && !els.llmPluginPrompt.value.trim()) {
     els.llmPluginPrompt.value = `补全当前文件中未完成的业务代码，任务目标：${title}`;
   }
@@ -3379,6 +4105,29 @@ async function completeManualCode() {
   els.manualCodeEditor.scrollTop = els.manualCodeEditor.scrollHeight;
   if (els.manualEditState) els.manualEditState.textContent = "LLM completion / ready";
   pushComment("LLM 插件", `已为 ${activeFileName} 生成真实补全候选，保存后进入 Review。`, "suggestion", codeKey());
+}
+
+function completeCurrentFileLines(title) {
+  const fileName = activeFileName || "";
+  const agentId = agentIdForFileName(fileName);
+  if (!agentId) return [];
+  const task = {
+    id: `manual-complete-${Date.now().toString(36)}`,
+    title,
+    workflowTitle: title,
+    owner: agentId,
+    source: "manual_complete",
+  };
+  return buildAgentArtifactLines(agentId, task, fileName);
+}
+
+function agentIdForFileName(fileName) {
+  if (/src\/|app\/static|\.html$|\.css$|\.vue$|\.jsx$|\.tsx$/.test(fileName)) return "frontend";
+  if (/app\/main\.py|server\.py|api|backend/.test(fileName)) return "backend";
+  if (/test|spec/.test(fileName)) return "tester";
+  if (/review|checklist|docs\//.test(fileName)) return "reviewer";
+  if (/README|\.md$|Agent\.py/.test(fileName)) return "master";
+  return "";
 }
 
 function loadLlmPluginConfig() {
@@ -3585,6 +4334,16 @@ async function syncGitRepository(event) {
       els.gitSyncResult.textContent = `${result.mode === "pull" ? "已更新" : "已拉取"}：${result.path}`;
     }
     pushComment("Git Bridge", `${result.repo} ${result.mode} 完成：${result.path}`, "suggestion", codeKey());
+    if (result.snapshot) applySnapshot(result.snapshot);
+    if (result.delivery?.id) {
+      setActiveRuntimeDelivery(result.delivery.id);
+      if (!projectDeliveries.some((item) => String(item.id) === String(result.delivery.id))) {
+        projectDeliveries.unshift(result.delivery);
+      }
+      if (els.gitSyncResult) els.gitSyncResult.textContent = `${result.mode === "pull" ? "已更新" : "已拉取"}并登记运行项目：${result.path}`;
+      openDeliveryRuntimeEnvironment(result.delivery.id);
+      await openProjectDeliveryRuntime(result.delivery.id, { openExternal: false });
+    }
   } catch (error) {
     if (els.gitSyncResult) els.gitSyncResult.textContent = `Git 同步失败：${error.message}`;
   } finally {
@@ -3639,12 +4398,19 @@ async function submitAutoCodeTask(event) {
 
 function selectAutoAgent(agentId, reason = "") {
   const normalizedAgent = agentId === "master" ? "frontend" : agentId;
+  selectedAgentId = normalizedAgent;
   document.querySelectorAll("[data-auto-agent]").forEach((button) => {
     button.classList.toggle("active", button.dataset.autoAgent === normalizedAgent);
   });
   if (els.autoCodeOwner) els.autoCodeOwner.value = normalizedAgent;
   focusAgentCodeTarget(normalizedAgent, els.autoCodeInput?.value || "");
-  if (reason && els.agentArbitrationNote) els.agentArbitrationNote.textContent = reason;
+  switchView("community");
+  switchOpenWorldPanel("codePanel");
+  const activeRepo = openWorldRepos.find((repo) => repo.id === activeRepoId) || openWorldRepos[0];
+  if (els.agentArbitrationNote) {
+    const prefix = reason || `指定：${agentById(normalizedAgent)?.name || normalizedAgent}。`;
+    els.agentArbitrationNote.textContent = `${prefix} 已在当前仓库找到对应代码：${activeRepo?.name || activeRepoId}/${activeFileName}。`;
+  }
   renderAutoAgentMonitor();
 }
 
@@ -3656,7 +4422,7 @@ async function arbitrateAutoAgent() {
   }
   if (!backendConnected) {
     const localOwner = localAgentRecommendation(title);
-    selectAutoAgent(localOwner, `推荐：${agentById(localOwner)?.name || localOwner}；已打开对应代码文件，产物需要能运行。`);
+    selectAutoAgent(localOwner);
     return;
   }
   try {
@@ -3669,10 +4435,10 @@ async function arbitrateAutoAgent() {
     if (!response.ok) throw new Error(result.detail || "arbitration failed");
     const recommended = result.recommended_agent || "frontend";
     const top = (result.scores || []).find((item) => item.agent_id === recommended);
-    selectAutoAgent(recommended, `推荐：${top?.label || recommended} 路 score ${top?.score ?? "-"}；已切到对应代码文件。`);
+    selectAutoAgent(recommended, `推荐：${top?.label || recommended} 路 score ${top?.score ?? "-"}。`);
   } catch {
     const localOwner = localAgentRecommendation(title);
-    selectAutoAgent(localOwner, `推荐：${agentById(localOwner)?.name || localOwner}；已切到对应代码文件。`);
+    selectAutoAgent(localOwner);
   }
 }
 
@@ -4194,8 +4960,7 @@ function sanitizeCodeText(value) {
   return String(value || "")
     .replace(/\\/g, "\\\\")
     .replace(/"/g, '\\"')
-    .replace(/\r?\n/g, " ")
-    .slice(0, 180);
+    .replace(/\r?\n/g, " ");
 }
 
 function inferBusinessSpec(title) {
@@ -4227,6 +4992,9 @@ function inferBusinessSpec(title) {
   }
   if (/(员工|人事|hr|考勤)/.test(text)) {
     return { ...base, domain: "hr", entityLabel: "员工事项", ownerLabel: "HR 负责人", seedItems: ["入职资料确认", "考勤异常处理", "绩效面谈安排"] };
+  }
+  if (/(oa|办公|审批|请假|报销|流程|公文|公告|会议)/.test(text)) {
+    return { ...base, domain: "oa", entityLabel: "OA流程", ownerLabel: "行政负责人", seedItems: ["请假审批", "费用报销", "会议室预定"] };
   }
   if (/(项目|研发|开发|代码|仓库)/.test(text)) {
     return { ...base, domain: "development", entityLabel: "开发任务", ownerLabel: "技术负责人", seedItems: ["前端页面实现", "后端接口联调", "测试验收通过"] };
@@ -4471,6 +5239,378 @@ function preferredProjectEntryFile(taskLike = {}) {
   return isVue3FrontendSpec(spec) ? "src/App.vue" : "app/static/app.js";
 }
 
+function businessModelForSpec(spec, title = "") {
+  const models = {
+    oa: {
+      appName: "OA 协同办公系统",
+      entity: "审批单",
+      apiBase: "approvals",
+      peopleApi: "employees",
+      actor: "applicant",
+      actorLabel: "申请人",
+      ownerLabel: "审批人",
+      statuses: ["待审批", "已通过", "已驳回"],
+      fields: ["title", "applicant", "department", "amount", "reason", "status"],
+      seed: [
+        { title: "请假审批", applicant: "林亦然", department: "研发部", amount: "-", reason: "年假 2 天", status: "待审批" },
+        { title: "费用报销", applicant: "周明", department: "财务部", amount: "860.50", reason: "客户拜访交通费", status: "已通过" },
+        { title: "会议室预定", applicant: "陈青", department: "行政部", amount: "-", reason: "周会会议室", status: "待审批" },
+      ],
+    },
+    crm: {
+      appName: "CRM 客户跟进系统",
+      entity: "客户",
+      apiBase: "customers",
+      peopleApi: "owners",
+      actor: "manager",
+      actorLabel: "客户经理",
+      ownerLabel: "负责人",
+      statuses: ["待跟进", "洽谈中", "已成交", "已流失"],
+      fields: ["title", "manager", "department", "amount", "reason", "status"],
+      seed: [
+        { title: "重点客户跟进", manager: "赵琪", department: "销售一组", amount: "120000", reason: "续约评估", status: "洽谈中" },
+        { title: "售后问题处理", manager: "宋远", department: "客户成功", amount: "-", reason: "工单升级", status: "待跟进" },
+      ],
+    },
+    order: {
+      appName: "订单运营系统",
+      entity: "订单",
+      apiBase: "orders",
+      peopleApi: "operators",
+      actor: "operator",
+      actorLabel: "运营人",
+      ownerLabel: "运营负责人",
+      statuses: ["待支付", "待发货", "售后中", "已完成"],
+      fields: ["title", "operator", "department", "amount", "reason", "status"],
+      seed: [
+        { title: "待支付订单", operator: "唐宁", department: "商城运营", amount: "399.00", reason: "催付", status: "待支付" },
+        { title: "售后退款订单", operator: "许岚", department: "售后", amount: "89.00", reason: "质量问题", status: "售后中" },
+      ],
+    },
+    hr: {
+      appName: "人事协同系统",
+      entity: "员工事项",
+      apiBase: "hr-items",
+      peopleApi: "employees",
+      actor: "employee",
+      actorLabel: "员工",
+      ownerLabel: "HR 负责人",
+      statuses: ["待处理", "处理中", "已完成", "已退回"],
+      fields: ["title", "employee", "department", "amount", "reason", "status"],
+      seed: [
+        { title: "入职资料确认", employee: "李然", department: "研发部", amount: "-", reason: "新员工入职", status: "待处理" },
+        { title: "考勤异常处理", employee: "韩青", department: "市场部", amount: "-", reason: "补卡申请", status: "处理中" },
+      ],
+    },
+  };
+  const fallback = {
+    appName: `${spec.entityLabel || "业务"}管理系统`,
+    entity: spec.entityLabel || "业务事项",
+    apiBase: "items",
+    peopleApi: "members",
+    actor: "owner",
+    actorLabel: spec.ownerLabel || "负责人",
+    ownerLabel: spec.ownerLabel || "负责人",
+    statuses: ["待处理", "进行中", "已完成", "已阻塞"],
+    fields: ["title", "owner", "department", "amount", "reason", "status"],
+    seed: (spec.seedItems || ["需求确认", "执行推进", "结果验收"]).map((item, index) => ({
+      title: item,
+      owner: spec.ownerLabel || "负责人",
+      department: index === 0 ? "业务部" : "执行组",
+      amount: "-",
+      reason: title || "业务流程推进",
+      status: index === 2 ? "已完成" : "待处理",
+    })),
+  };
+  return models[spec.domain] || fallback;
+}
+
+function buildAgentWorkPlan(agentId, taskLike = {}, fileName = "") {
+  const title = taskLike.workflowTitle || taskLike.title || "QuantumFlow 自动任务";
+  const spec = inferBusinessSpec(title);
+  const model = businessModelForSpec(spec, title);
+  const roleFocus = {
+    frontend: `把 ${model.entity} 做成可操作工作台，包含筛选、列表、状态流转和新增入口。`,
+    backend: `提供 ${model.entity} 的 REST API、初始数据、创建和状态决策接口。`,
+    tester: `验证 ${model.entity} 的健康检查、列表读取、创建和状态流转，不复制实现代码。`,
+    reviewer: `检查前后端契约、测试覆盖、职责边界和是否生成了真实业务功能。`,
+  }[agentId] || "按技术书拆解职责并产出可运行代码。";
+  return {
+    title,
+    spec,
+    model,
+    fileName,
+    roleFocus,
+    decisions: [
+      `业务域：${model.appName}`,
+      `核心实体：${model.entity}`,
+      `状态流：${model.statuses.join(" -> ")}`,
+      `目标文件：${fileName}`,
+      `职责判断：${roleFocus}`,
+    ],
+  };
+}
+
+function agentDecisionHeader(plan, prefix = "//") {
+  return [
+    `${prefix} Agent 工作判断`,
+    `${prefix} ${plan.decisions.join("；")}`,
+    "",
+  ];
+}
+
+function autonomousAgentArtifactLines(agentId, taskLike = {}, fileName = "", taskId = "") {
+  const plan = buildAgentWorkPlan(agentId, taskLike, fileName);
+  const model = plan.model;
+  const safeSeed = JSON.stringify(model.seed, null, 2);
+  const statuses = JSON.stringify(model.statuses);
+  if (agentId === "backend") {
+    const actor = model.actor;
+    return [
+      ...agentDecisionHeader(plan, "#"),
+      "from fastapi import FastAPI, HTTPException",
+      "from pydantic import BaseModel",
+      "",
+      `app = FastAPI(title="${model.appName}")`,
+      "",
+      "class BusinessItemCreate(BaseModel):",
+      "    title: str",
+      `    ${actor}: str`,
+      "    department: str = \"综合部\"",
+      "    amount: str | None = None",
+      "    reason: str = \"\"",
+      "",
+      `items = ${safeSeed}`,
+      `people = [{"id": 1, "name": "林亦然", "role": "${model.ownerLabel}", "department": "综合部"}]`,
+      "",
+      "@app.get(\"/api/health\")",
+      "def health():",
+      `    return {"ok": True, "service": "${model.apiBase}", "task_id": "${taskId}"}`,
+      "",
+      `@app.get("/api/${model.peopleApi}")`,
+      "def list_people():",
+      "    return people",
+      "",
+      `@app.get("/api/${model.apiBase}")`,
+      "def list_items(status: str | None = None):",
+      "    if not status or status == \"全部\":",
+      "        return items",
+      "    return [item for item in items if item[\"status\"] == status]",
+      "",
+      `@app.post("/api/${model.apiBase}")`,
+      "def create_item(payload: BusinessItemCreate):",
+      "    next_id = max([int(item.get(\"id\", 0)) for item in items] + [100]) + 1",
+      "    item = {\"id\": next_id, \"status\": \"待处理\", **payload.model_dump()}",
+      "    if item[\"status\"] not in " + JSON.stringify(model.statuses).replace(/"/g, "\"") + ":",
+      `        item["status"] = "${model.statuses[0]}"`,
+      "    items.insert(0, item)",
+      "    return item",
+      "",
+      `@app.post("/api/${model.apiBase}/{item_id}/decision")`,
+      "def decide_item(item_id: int, status: str):",
+      `    allowed = ${statuses}`,
+      "    if status not in allowed:",
+      "        raise HTTPException(status_code=400, detail=\"invalid status\")",
+      "    for item in items:",
+      "        if int(item.get(\"id\", 0)) == item_id:",
+      "            item[\"status\"] = status",
+      "            return item",
+      "    raise HTTPException(status_code=404, detail=\"item not found\")",
+    ];
+  }
+  if (agentId === "tester") {
+    return [
+      ...agentDecisionHeader(plan, "#"),
+      "from fastapi.testclient import TestClient",
+      "from app.main import app",
+      "",
+      "client = TestClient(app)",
+      "",
+      "def test_health_and_business_lists():",
+      `    assert client.get("/api/health").json()["service"] == "${model.apiBase}"`,
+      `    assert len(client.get("/api/${model.peopleApi}").json()) >= 1`,
+      `    data = client.get("/api/${model.apiBase}").json()`,
+      "    assert isinstance(data, list)",
+      `    assert any(item["title"] == "${model.seed[0]?.title || model.entity}" for item in data)`,
+      "",
+      "def test_create_and_decide_business_item():",
+      `    payload = {"title": "${model.entity}自动化验收", "${model.actor}": "测试用户", "department": "测试部", "amount": "128.00", "reason": "自动化测试"}`,
+      `    created = client.post("/api/${model.apiBase}", json=payload).json()`,
+      `    assert created["status"] == "${model.statuses[0]}"`,
+      `    decided = client.post(f"/api/${model.apiBase}/{created['id']}/decision", params={"status": "${model.statuses[1] || model.statuses[0]}"}).json()`,
+      `    assert decided["status"] == "${model.statuses[1] || model.statuses[0]}"`,
+    ];
+  }
+  if (agentId === "reviewer") {
+    return [
+      `# ${model.appName} Reviewer 审查清单`,
+      "",
+      ...plan.decisions.map((item) => `- ${item}`),
+      "",
+      "## 必须通过",
+      `- [ ] 后端提供 /api/${model.apiBase} 和状态决策接口。`,
+      `- [ ] 前端围绕 ${model.entity} 展示真实业务操作，不是静态说明。`,
+      "- [ ] 测试文件只写测试断言，不复制后端实现。",
+      "- [ ] 各 Agent 只写职责内文件。",
+    ];
+  }
+  return [
+    ...agentDecisionHeader(plan, "//"),
+    `const state = { taskId: "${taskId}", activeStatus: "全部", items: ${JSON.stringify(model.seed)} };`,
+    `const statusOptions = ["全部", ...${statuses}];`,
+    "function visibleItems() {",
+    "  return state.activeStatus === \"全部\" ? state.items : state.items.filter((item) => item.status === state.activeStatus);",
+    "}",
+    "function decideItem(id, status) {",
+    "  const item = state.items.find((row) => row.id === id);",
+    "  if (item) item.status = status;",
+    "  renderBusinessApp();",
+    "}",
+    "function renderBusinessApp() {",
+    "  const root = document.getElementById(\"app\") || document.body;",
+    "  const pending = state.items.filter((item) => item.status === statusOptions[1]).length;",
+    `  const cards = visibleItems().map((item) => {`,
+    `    const actor = item["${model.actor}"] || item.owner || "";`,
+    "    const actions = statusOptions.slice(1).map((status) => `<button onclick=\"decideItem(${item.id || 0}, '${status}')\">${status}</button>`).join(\"\");",
+    "    return `<article><strong>${item.title}</strong><span>${actor} / ${item.department || \"\"}</span><em>${item.status}</em><p>${item.reason || \"\"}</p>${actions}</article>`;",
+    "  }).join(\"\");",
+    "  const tabs = statusOptions.map((status) => `<button onclick=\"state.activeStatus='${status}';renderBusinessApp()\" class=\"${state.activeStatus === status ? 'active' : ''}\">${status}</button>`).join(\"\");",
+    "  root.innerHTML = `",
+    `    <main class="business-shell"><aside><strong>${model.appName}</strong><button class="active">${model.entity}中心</button><button>成员</button><button>报表</button></aside>`,
+    `    <section><header><h1>${model.appName}</h1><span>待处理 \${pending} 项</span></header>`,
+    "    <nav>${tabs}</nav><div class=\"business-grid\">${cards}</div>",
+    "    </section></main>`;",
+    "}",
+    "renderBusinessApp();",
+  ];
+}
+
+function oaSystemArtifactLines(agentId, fileName, taskId, title) {
+  const lower = fileName.toLowerCase();
+  if (agentId === "tester" || lower.includes("test") || lower.includes("spec")) {
+    return [
+      "from fastapi.testclient import TestClient",
+      "from app.main import app",
+      "",
+      "client = TestClient(app)",
+      "",
+      "def test_oa_health_and_lists():",
+      "    assert client.get(\"/api/health\").json()[\"service\"] == \"oa\"",
+      "    assert len(client.get(\"/api/employees\").json()) >= 2",
+      "    assert any(item[\"title\"] == \"请假审批\" for item in client.get(\"/api/approvals\").json())",
+      "",
+      "def test_create_and_decide_approval():",
+      "    payload = {\"title\": \"采购审批\", \"applicant\": \"林亦然\", \"amount\": 1299, \"reason\": \"办公设备\"}",
+      "    created = client.post(\"/api/approvals\", json=payload).json()",
+      "    assert created[\"status\"] == \"待审批\"",
+      "    decided = client.post(f\"/api/approvals/{created['id']}/decision\", params={\"status\": \"已通过\"}).json()",
+      "    assert decided[\"status\"] == \"已通过\"",
+    ];
+  }
+  if (agentId === "backend" || lower.endsWith("app/main.py") || lower.endsWith("backend/main.py")) {
+    return [
+      "from fastapi import FastAPI, HTTPException",
+      "from pydantic import BaseModel",
+      "",
+      "app = FastAPI(title=\"OA 协同办公系统\")",
+      "",
+      "class ApprovalCreate(BaseModel):",
+      "    title: str",
+      "    applicant: str",
+      "    amount: float | None = None",
+      "    reason: str",
+      "",
+      "employees = [",
+      "    {\"id\": 1, \"name\": \"林亦然\", \"department\": \"研发部\", \"role\": \"前端工程师\", \"status\": \"在岗\"},",
+      "    {\"id\": 2, \"name\": \"周明\", \"department\": \"财务部\", \"role\": \"审批人\", \"status\": \"在岗\"},",
+      "]",
+      "approvals = [",
+      "    {\"id\": 101, \"title\": \"请假审批\", \"applicant\": \"林亦然\", \"amount\": None, \"reason\": \"年假 2 天\", \"status\": \"待审批\"},",
+      "    {\"id\": 102, \"title\": \"费用报销\", \"applicant\": \"周明\", \"amount\": 860.5, \"reason\": \"客户拜访交通费\", \"status\": \"已通过\"},",
+      "]",
+      "",
+      "@app.get(\"/api/health\")",
+      "def health():",
+      `    return {\"ok\": True, \"service\": \"oa\", \"task_id\": \"${taskId}\"}`,
+      "",
+      "@app.get(\"/api/employees\")",
+      "def list_employees():",
+      "    return employees",
+      "",
+      "@app.get(\"/api/approvals\")",
+      "def list_approvals(status: str | None = None):",
+      "    if not status or status == \"全部\":",
+      "        return approvals",
+      "    return [item for item in approvals if item[\"status\"] == status]",
+      "",
+      "@app.post(\"/api/approvals\")",
+      "def create_approval(payload: ApprovalCreate):",
+      "    item = {\"id\": max(item[\"id\"] for item in approvals) + 1, \"status\": \"待审批\", **payload.model_dump()}",
+      "    approvals.insert(0, item)",
+      "    return item",
+      "",
+      "@app.post(\"/api/approvals/{approval_id}/decision\")",
+      "def decide_approval(approval_id: int, status: str):",
+      "    if status not in {\"已通过\", \"已驳回\", \"待审批\"}:",
+      "        raise HTTPException(status_code=400, detail=\"invalid status\")",
+      "    for item in approvals:",
+      "        if item[\"id\"] == approval_id:",
+      "            item[\"status\"] = status",
+      "            return item",
+      "    raise HTTPException(status_code=404, detail=\"approval not found\")",
+    ];
+  }
+  if (agentId === "reviewer" || lower.endsWith(".md")) {
+    return [
+      "# OA 系统 Reviewer 审查清单",
+      "",
+      `- 任务：${title}`,
+      `- 任务 ID：${taskId}`,
+      "",
+      "## 必须通过",
+      "- [x] 后端提供员工列表、审批列表、新建审批、审批决策 API。",
+      "- [x] 前端呈现 OA 工作台，而不是静态技术说明。",
+      "- [x] 测试覆盖健康检查、审批创建和审批状态流转。",
+      "- [x] 所有 Agent 只写职责内文件，不能改 IDE/配置缓存文件。",
+    ];
+  }
+  return [
+    "const state = {",
+    `  taskId: \"${taskId}\",`,
+    "  activeStatus: \"全部\",",
+    "  approvals: [",
+    "    { id: 101, title: \"请假审批\", applicant: \"林亦然\", department: \"研发部\", amount: \"-\", status: \"待审批\" },",
+    "    { id: 102, title: \"费用报销\", applicant: \"周明\", department: \"财务部\", amount: \"860.50\", status: \"已通过\" },",
+    "    { id: 103, title: \"会议室预定\", applicant: \"陈青\", department: \"行政部\", amount: \"-\", status: \"待审批\" },",
+    "  ],",
+    "};",
+    "",
+    "const statusOptions = [\"全部\", \"待审批\", \"已通过\", \"已驳回\"];",
+    "function filteredApprovals() {",
+    "  return state.activeStatus === \"全部\" ? state.approvals : state.approvals.filter((item) => item.status === state.activeStatus);",
+    "}",
+    "function decideApproval(id, status) {",
+    "  const item = state.approvals.find((approval) => approval.id === id);",
+    "  if (item) item.status = status;",
+    "  renderOA();",
+    "}",
+    "function renderOA() {",
+    "  const root = document.getElementById(\"app\") || document.body;",
+    "  const pending = state.approvals.filter((item) => item.status === \"待审批\").length;",
+    "  root.innerHTML = `",
+    "    <main class=\"oa-shell\">",
+    "      <aside class=\"oa-nav\"><strong>OA 办公</strong><button class=\"active\">审批中心</button><button>员工通讯录</button><button>会议室</button></aside>",
+    "      <section class=\"oa-workbench\">",
+    "        <header><h1>OA 协同办公系统</h1><span>待审批 ${pending} 项</span></header>",
+    "        <div class=\"oa-status-tabs\">${statusOptions.map((item) => `<button onclick=\"state.activeStatus='${item}';renderOA()\" class=\"${state.activeStatus === item ? 'active' : ''}\">${item}</button>`).join('')}</div>",
+    "        <div class=\"oa-grid\">${filteredApprovals().map((item) => `<article><strong>${item.title}</strong><span>${item.applicant} / ${item.department}</span><em>${item.status}</em><p>金额：${item.amount}</p><button onclick=\"decideApproval(${item.id}, '已通过')\">通过</button><button onclick=\"decideApproval(${item.id}, '已驳回')\">驳回</button></article>`).join('')}</div>",
+    "      </section>",
+    "    </main>`;",
+    "}",
+    "renderOA();",
+  ];
+}
+
 function buildAgentArtifactLines(agentId, taskLike = {}, fileName = "") {
   const agent = agentById(agentId) || { id: agentId, role: "Agent", name: agentId };
   const taskId = sanitizeCodeText(taskLike.id || taskLike.backendId || `local-${Date.now().toString(36)}`);
@@ -4479,6 +5619,9 @@ function buildAgentArtifactLines(agentId, taskLike = {}, fileName = "") {
   const spec = inferBusinessSpec(title);
   const libraryAdminLines = isVue3FrontendSpec(spec) ? vue3LibraryAdminArtifactLines(fileName, taskId, title, branch) : null;
   if (libraryAdminLines) return libraryAdminLines;
+  if (taskLike.requirementDoc || ["oa", "crm", "order", "hr"].includes(spec.domain)) {
+    return autonomousAgentArtifactLines(agentId, taskLike, fileName, taskId);
+  }
 
   if (isVue3FrontendSpec(spec) && fileName.endsWith("package.json")) {
     return [
@@ -5092,8 +6235,7 @@ function runTask(index = currentTaskIndex + 1, options = {}) {
   const owner = agentById(task.owner);
   if (!owner) return;
   if (task.status === "assigned" && !options.local) {
-    selectedAgentId = owner.id;
-    openWorkerAcceptPanel(owner, task);
+    startWorkerTaskFromReviewer(task);
     return;
   }
   selectedAgentId = owner.id;
@@ -5186,7 +6328,7 @@ function processCodeStreamQueue() {
 
 function runCodeStream({ repoId, fileName, lines, agentName = "Agent", taskTitle = "代码生成", replace = false, dedupeKey = "" }) {
   const repo = openWorldRepos.find((item) => item.id === repoId);
-  if (!repo || !repo.files[fileName] || !lines?.length) {
+  if (!repo || !lines?.length) {
     if (dedupeKey) {
       queuedCodeStreamKeys.delete(dedupeKey);
       completedCodeStreamKeys.add(dedupeKey);
@@ -5195,6 +6337,7 @@ function runCodeStream({ repoId, fileName, lines, agentName = "Agent", taskTitle
     processCodeStreamQueue();
     return;
   }
+  if (!repo.files[fileName]) repo.files[fileName] = [`// ${fileName}`, "// Created by QuantumFlow Agent."];
   const key = codeKey(repoId, fileName);
   if (streamingCodeTimers.has(key)) {
     window.clearInterval(streamingCodeTimers.get(key));
@@ -5208,6 +6351,24 @@ function runCodeStream({ repoId, fileName, lines, agentName = "Agent", taskTitle
   streamingCodeLineIndex = Math.max(0, base.length - 1);
   renderCommunity();
   pushComment(agentName, `开始流式写入 ${repo.name}/${fileName}：${taskTitle}`, "streaming", key);
+
+  if (lines.length > 180 || lines.join("\n").length > 12000) {
+    generatedCodeOverrides[key] = [...lines];
+    repo.files[fileName] = [...lines];
+    repo.custom = true;
+    saveCustomInternalRepos();
+    streamingCodeLineIndex = -1;
+    streamingCodeKey = "";
+    renderCommunity();
+    pushComment(agentName, `已完整写入 ${lines.length} 行代码：${taskTitle}`, "suggestion", key);
+    if (dedupeKey) {
+      queuedCodeStreamKeys.delete(dedupeKey);
+      completedCodeStreamKeys.add(dedupeKey);
+    }
+    streamingCodeActive = false;
+    processCodeStreamQueue();
+    return;
+  }
 
   let lineIndex = 0;
   let charIndex = 0;
@@ -5233,6 +6394,9 @@ function runCodeStream({ repoId, fileName, lines, agentName = "Agent", taskTitle
     if (lineIndex >= lines.length) {
       window.clearInterval(timer);
       streamingCodeTimers.delete(key);
+      repo.files[fileName] = [...(generatedCodeOverrides[key] || lines)];
+      repo.custom = true;
+      saveCustomInternalRepos();
       streamingCodeLineIndex = -1;
       streamingCodeKey = "";
       renderCommunity();
@@ -5297,13 +6461,18 @@ function writeCollaborativeProjectCode(task) {
   const deliveryKey = `collab:${taskDeliveryKey(task)}`;
   if (codedTaskKeys.has(deliveryKey)) return;
   codedTaskKeys.add(deliveryKey);
-  const plan = collaborativeProjectPlan(task);
+  const basePlan = collaborativeProjectPlan(task);
+  const deliveryRepo = ensureAgentDeliveryRepo(task, basePlan);
+  const plan = basePlan.map((item) => ({
+    ...item,
+    repoId: deliveryRepo.id,
+  }));
   const firstItem = plan[0];
   if (firstItem) {
-    activeRepoId = firstItem.repoId;
-    activeFileName = firstItem.fileName;
+    openAutoCodeWorkspace(firstItem.repoId, firstItem.fileName);
   }
   plan.forEach((item) => {
+    ensureAgentDeliveryFile(deliveryRepo, item.fileName, item.agent?.id || item.agentId || "master");
     streamCodeLines({
       repoId: item.repoId,
       fileName: item.fileName,
@@ -5315,9 +6484,10 @@ function writeCollaborativeProjectCode(task) {
     });
   });
   const compatibility = runCompatibilityGate(task, plan);
-  pushComment("测试 Agent", compatibility.ok ? compatibility.summary : `${compatibility.summary} 已退回 ${compatibility.ownerName} 免费重构。`, compatibility.ok ? "suggestion" : "issue", "project/tests/compatibility");
+  pushComment("测试 Agent", compatibility.ok ? compatibility.summary : `${compatibility.summary} 已退回 ${compatibility.ownerName} 免费重构。`, compatibility.ok ? "suggestion" : "issue", codeKey(deliveryRepo.id, "tests/compatibility"));
   if (!compatibility.ok && compatibility.reworkItem) {
     window.setTimeout(() => {
+      ensureAgentDeliveryFile(deliveryRepo, compatibility.reworkItem.fileName, compatibility.reworkItem.agent?.id || compatibility.reworkItem.agentId || "master");
       streamCodeLines({
         repoId: compatibility.reworkItem.repoId,
         fileName: compatibility.reworkItem.fileName,
@@ -5370,16 +6540,26 @@ function writeSingleAgentProjectCode(task) {
   if (codedTaskKeys.has(deliveryKey)) return;
   codedTaskKeys.add(deliveryKey);
   const owner = agentById(task.owner) || agentById("frontend");
-  const [repoId, fileName] = codeTargetForAgent(owner.id, task.title || "");
-  activeRepoId = repoId;
-  activeFileName = fileName;
+  const [, fileName] = codeTargetForAgent(owner.id, task.title || "");
+  const plan = [
+    {
+      agentId: owner.id,
+      agent: owner,
+      fileName,
+      lines: prependRequirementContext(buildAgentArtifactLines(owner.id, task, fileName), task, owner.name, fileName),
+    },
+  ];
+  const deliveryRepo = ensureAgentDeliveryRepo(task, plan);
+  const repoId = deliveryRepo.id;
+  openAutoCodeWorkspace(repoId, fileName);
+  ensureAgentDeliveryFile(deliveryRepo, fileName, owner.id);
   streamCodeLines({
     repoId,
     fileName,
     agentName: owner.name,
     taskTitle: `${task.title} / ${owner.name} 定向产物`,
     taskId: taskDeliveryKey(task),
-    lines: buildAgentArtifactLines(owner.id, task, fileName),
+    lines: plan[0].lines,
     replace: true,
   });
 }
@@ -5398,7 +6578,7 @@ function writeTaskCompletionCode(task, owner) {
     agentName: owner.name,
     taskTitle: task.title,
     taskId: taskDeliveryKey(task),
-    lines: buildAgentArtifactLines(owner.id, task, fileName),
+    lines: prependRequirementContext(buildAgentArtifactLines(owner.id, task, fileName), task, owner.name, fileName),
     replace: true,
   });
 }
@@ -5427,7 +6607,7 @@ function renderAutoAgentMonitor() {
   document.querySelectorAll("[data-auto-agent-monitor]").forEach((button) => {
     button.addEventListener("click", () => {
       const id = button.dataset.autoAgentMonitor;
-      selectAutoAgent(id, `指定：${agentById(id)?.name || id}；已打开对应代码文件，完成后必须可运行。`);
+      selectAutoAgent(id);
     });
   });
 }
@@ -5639,12 +6819,12 @@ function renderMasterHandoffDialog(snapshot = currentMasterHandoffSnapshot()) {
   const selectedIds = new Set(snapshot.selectedOwners || snapshot.targetOwners);
   const selectedNames = (snapshot.selectedRows || snapshot.freeRows).map((item) => item.name).join("、") || "无";
   const commandPreview = canSubmit
-    ? `任务交接：${handoff.title}；团队负责人接收后通知代码审查者，代码审查者按定向目标启动：${selectedNames}。`
+    ? `任务交接：${handoff.title}；团队负责人接收后生成需求书/技术书，交给代码负责人按定向目标启动：${selectedNames}。`
     : `任务交接：${handoff.title}；${snapshot.reviewerBusy ? "代码审查者正在处理任务" : "定向执行 Agent 正忙"}，暂不接收。`;
   dialog.innerHTML = `
     <div class="master-handoff-card" role="dialog" aria-modal="true" aria-label="团队负责人任务接收确认">
       <header class="master-handoff-head">
-        <div><span>Master 权限确认</span><h3>是否允许团队负责人接收任务，并通知代码负责人协调执行？</h3></div>
+        <div><span>Master 权限确认</span><h3>是否允许团队负责人接收任务、生成技术书，并交给代码负责人？</h3></div>
         <button type="button" data-master-handoff-close title="关闭">×</button>
       </header>
       <div class="master-handoff-body">
@@ -5771,6 +6951,7 @@ async function acceptMasterHandoff() {
   }
   const title = pendingMasterHandoff.title;
   const selectedOwners = snapshot.selectedOwners;
+  const requirementDoc = generateMasterRequirementDoc(title, selectedOwners);
   tasks.push({
     id: `local-${localWorkflowTaskSeq++}`,
     localWorkflowId: `reviewer-intake-${Date.now().toString(36)}`,
@@ -5783,13 +6964,14 @@ async function acceptMasterHandoff() {
     source: "master_handoff",
     reviewerIntake: true,
     suggestedOwners: selectedOwners,
+    requirementDoc,
   });
   setAgent("master", { status: "done" });
   setAgent("reviewer", { status: "idle" });
   const ownerNames = selectedOwners.map((id) => agentById(id)?.name || id).join("、");
-  recordMasterTaskHistory("接收并转交", title, `已交给代码负责人；定向执行 Agent：${ownerNames}`);
-  addLog(`团队负责人已接收任务并通知代码负责人：${title}`, "团队负责人");
-  pushComment("团队负责人", `已接收任务并交给代码负责人；已选择执行 Agent：${ownerNames}`);
+  recordMasterTaskHistory("生成技术书并转交", title, `${requirementDoc.id} 已交给代码负责人；定向执行 Agent：${ownerNames}`);
+  addLog(`团队负责人已生成技术书 ${requirementDoc.id} 并通知代码负责人：${title}`, "团队负责人");
+  pushComment("团队负责人", `已生成需求书/技术书 ${requirementDoc.id}，交给代码负责人；定向 Agent：${ownerNames}`);
   closeMasterHandoffDialog();
   renderAll();
 }
@@ -5973,6 +7155,13 @@ els.pauseBtn.addEventListener("click", () => {
 els.runtimeProjectTestBtn?.addEventListener("click", () => testProjectDelivery(getActiveRuntimeDelivery()?.id));
 els.runtimeProjectOpenBtn?.addEventListener("click", () => openProjectDeliveryRuntime(getActiveRuntimeDelivery()?.id));
 els.runtimeProjectFixBtn?.addEventListener("click", () => requestProjectDeliveryFix(getActiveRuntimeDelivery()?.id));
+els.runtimeRepoSelect?.addEventListener("change", () => {
+  setActiveRuntimeRepo(els.runtimeRepoSelect.value);
+  renderRuntimeRepoTester();
+});
+els.runtimeRepoTestBtn?.addEventListener("click", () => testRuntimeRepo(els.runtimeRepoSelect?.value));
+els.runtimeRepoPreviewBtn?.addEventListener("click", () => previewRuntimeRepo(els.runtimeRepoSelect?.value));
+els.runtimeRepoOpenCodeBtn?.addEventListener("click", openRuntimeRepoInCode);
 els.runtimePreviewRefreshBtn?.addEventListener("click", () => {
   const url = els.runtimeProjectFrame?.src || "";
   if (!url) return;
@@ -6016,9 +7205,31 @@ function openInternalRepoCreateForm() {
   switchOpenWorldPanel("repoCreatePanel");
   els.repoCreateName?.focus();
 }
+
+function syncRepoCreateTypeDefaults() {
+  const type = els.repoCreateType?.value || "fullstack";
+  if (type === "frontend" && els.repoCreateBackendLang) els.repoCreateBackendLang.value = "None";
+  if (type === "backend" && els.repoCreateFrontendLang) els.repoCreateFrontendLang.value = "None";
+  if (type === "connector" && els.repoCreateFrontendLang) els.repoCreateFrontendLang.value = "None";
+  if (["fullstack", "plugin"].includes(type) && els.repoCreateFrontendLang?.value === "None") els.repoCreateFrontendLang.value = "Vue 3";
+  if (["fullstack", "plugin", "connector"].includes(type) && els.repoCreateBackendLang?.value === "None") els.repoCreateBackendLang.value = "Python / FastAPI";
+}
+
+function openInternalRepoFileCreateForm(repoId = activeRepoId) {
+  const repo = openWorldRepos.find((item) => item.id === repoId) || openWorldRepos.find((item) => item.id === activeRepoId) || openWorldRepos[0];
+  if (!repo || !els.repoFileCreateForm) return;
+  activeRepoId = repo.id;
+  if (els.repoFileCreateCrumb) els.repoFileCreateCrumb.textContent = `内部仓库 / ${repo.name} / 新建文件`;
+  if (els.repoFileCreateRepoName) els.repoFileCreateRepoName.textContent = repo.name;
+  if (els.repoFileCreateAgent) els.repoFileCreateAgent.value = selectedAgentId || "frontend";
+  switchOpenWorldPanel("repoFileCreatePanel");
+  els.repoFileCreateName?.focus();
+}
 els.repoQuickCreateBtn?.addEventListener("click", openInternalRepoCreateForm);
 els.repoCreateToggleBtn?.addEventListener("click", openInternalRepoCreateForm);
+els.repoCreateType?.addEventListener("change", syncRepoCreateTypeDefaults);
 els.repoCreateForm?.addEventListener("submit", createInternalRepo);
+els.repoFileCreateForm?.addEventListener("submit", createInternalRepoFile);
 document.querySelectorAll(".repo-search").forEach((input) => {
   input.addEventListener("input", () => {
     repoInlineQuery = input.value || "";
@@ -6099,10 +7310,6 @@ document.addEventListener("click", (event) => {
   if (reviewerReviewSubmit) {
     approveReviewerPackage();
   }
-  const workerAccept = event.target.closest?.("[data-worker-accept-task]");
-  if (workerAccept) {
-    acceptWorkerTask(workerAccept.dataset.workerAcceptTask);
-  }
   const masterDeliver = event.target.closest?.("[data-master-deliver-task]");
   if (masterDeliver) {
     deliverMasterTask(masterDeliver.dataset.masterDeliverTask);
@@ -6172,7 +7379,7 @@ document.querySelectorAll("[data-coding-mode]").forEach((button) => {
 document.querySelectorAll("[data-auto-agent]").forEach((button) => {
   button.addEventListener("click", () => {
     const id = button.dataset.autoAgent;
-    selectAutoAgent(id, `指定：${agentById(id)?.name || id}；已切到它负责的代码文件。`);
+    selectAutoAgent(id);
   });
 });
 els.studioClose.addEventListener("click", closeCoderStudio);
@@ -6380,6 +7587,29 @@ function avatarInitial(name) {
   return clean.slice(0, 1).toUpperCase();
 }
 
+function normalizeOnlinePeer(peer = {}, index = 0) {
+  return {
+    ...peer,
+    id: peer.id || `online-${index}`,
+    name: repairMojibake(peer.name || ""),
+    role: repairMojibake(peer.role || "Developer"),
+    kind: peer.kind || "developer",
+    color: peer.color || (peer.kind === "assistant" ? "#2fe098" : "#21d6e7"),
+    ip: repairMojibake(peer.ip || ""),
+    host: repairMojibake(peer.host || ""),
+    source: repairMojibake(peer.source || peer.ip || peer.host || "LAN / WebSocket"),
+    status: repairMojibake(peer.status || "online"),
+  };
+}
+
+function isUsableOnlinePeer(peer = {}) {
+  const name = String(peer.name || "").trim();
+  if (!name) return false;
+  if (/^[?\uFFFD\s]+$/.test(name)) return false;
+  if (name.includes("????")) return false;
+  return true;
+}
+
 function realOnlineCollaboratorRows() {
   const source = publicWorldOnlinePeers.length
     ? publicWorldOnlinePeers
@@ -6389,15 +7619,8 @@ function realOnlineCollaboratorRows() {
     : [codexAssistantPeer, ...source];
   return merged
     .filter((peer) => peer.kind !== "virtual_network")
-    .map((peer, index) => ({
-      id: peer.id || `online-${index}`,
-      name: repairMojibake(peer.name || "Developer"),
-      role: repairMojibake(peer.role || "Developer"),
-      kind: peer.kind || "developer",
-      color: peer.color || (peer.kind === "assistant" ? "#2fe098" : "#21d6e7"),
-      source: repairMojibake(peer.source || peer.ip || peer.host || "LAN / WebSocket"),
-      status: repairMojibake(peer.status || "online"),
-    }));
+    .map(normalizeOnlinePeer)
+    .filter(isUsableOnlinePeer);
 }
 
 function renderSourceOnlineCollaborators(rows = realOnlineCollaboratorRows()) {
@@ -6425,15 +7648,7 @@ function renderOnlineCollaborators(peers = []) {
   const mergedPeers = sourcePeers.some((peer) => String(peer.id || "").toLowerCase() === codexAssistantPeer.id)
     ? sourcePeers
     : [codexAssistantPeer, ...sourcePeers];
-  const onlinePeers = mergedPeers.map((peer) => ({
-    ...peer,
-    name: repairMojibake(peer.name || "Developer"),
-    role: repairMojibake(peer.role || "Developer"),
-    ip: repairMojibake(peer.ip || ""),
-    host: repairMojibake(peer.host || ""),
-    source: repairMojibake(peer.source || ""),
-    status: repairMojibake(peer.status || "online"),
-  }));
+  const onlinePeers = mergedPeers.map(normalizeOnlinePeer).filter(isUsableOnlinePeer);
   publicWorldOnlinePeers = onlinePeers;
   if (els.adminChatOnline) els.adminChatOnline.textContent = `${onlinePeers.length} online`;
   if (els.onlineCount) els.onlineCount.textContent = String(onlinePeers.length);

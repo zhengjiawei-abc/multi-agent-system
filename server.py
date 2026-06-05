@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import os
 import re
 import secrets
 import shutil
@@ -1109,7 +1110,7 @@ def is_internal_repo_text_file(path: Path) -> bool:
         return False
 
 
-def read_internal_repo_file_lines(path: Path, max_lines: int = 180) -> List[str]:
+def read_internal_repo_file_lines(path: Path, max_lines: int | None = None) -> List[str]:
     try:
         text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
@@ -1120,7 +1121,7 @@ def read_internal_repo_file_lines(path: Path, max_lines: int = 180) -> List[str]
     except OSError:
         return ["// 无法读取文件"]
     lines = text.splitlines()
-    if len(lines) > max_lines:
+    if max_lines and len(lines) > max_lines:
         return [*lines[:max_lines], f"... 文件较长，已截取前 {max_lines} 行"]
     return lines or [""]
 
@@ -1390,8 +1391,30 @@ async def run_project_delivery(delivery_id: int) -> Dict[str, Any]:
     port = project_delivery_port(delivery_id)
     url = f"http://127.0.0.1:{port}"
     is_frontend_project = (project_path / "package.json").exists()
+    install_output = ""
     if is_frontend_project:
-        command = [str(project_python_exe()), "-m", "http.server", str(port), "--bind", "127.0.0.1"]
+        try:
+            install_output = install_frontend_dependencies(project_path)
+        except (RuntimeError, subprocess.TimeoutExpired) as exc:
+            output = str(exc)
+            updated = store.update_project_delivery_test(
+                delivery_id,
+                test_status="failed",
+                test_output=output[-4000:],
+            )
+            store.record_task_log(
+                str(delivery.get("task_id") or ""),
+                "tester",
+                "Runtime Test Environment",
+                "project_runtime_run",
+                str(delivery.get("title") or ""),
+                output[-1000:],
+                status="failed",
+            )
+            await broadcast({"kind": "snapshot", "data": runtime_snapshot()})
+            state = project_delivery_runtime_state(delivery_id)
+            return {"ok": False, "status": "failed", "url": url, "delivery": {**(updated or delivery), **state}, "output": output}
+        command = frontend_project_command(project_path, port)
     else:
         command = [
             str(project_python_exe()),
@@ -1410,6 +1433,7 @@ async def run_project_delivery(delivery_id: int) -> Dict[str, Any]:
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
+        env={**os.environ, "HOST": "127.0.0.1", "PORT": str(port), "BROWSER": "none"},
         creationflags=creationflags,
     )
     delivery_runtime_processes[delivery_id] = {"process": process, "port": port, "url": url}
@@ -1423,13 +1447,15 @@ async def run_project_delivery(delivery_id: int) -> Dict[str, Any]:
         try:
             probe_url = url if is_frontend_project else f"{url}/api/health"
             await asyncio.to_thread(urllib.request.urlopen, probe_url, timeout=0.6)
-            output = "Vue3 前端预览已启动，可打开网页界面测试。" if is_frontend_project else "项目 Web UI 已启动，可打开网页界面测试。"
+            output = "前端项目脚本已执行，Web UI 已启动，可打开网页界面测试。" if is_frontend_project else "项目 Web UI 已启动，可打开网页界面测试。"
             break
         except Exception:
             continue
 
     if not output:
         output = "项目进程已启动，健康检查仍在等待中。"
+    if install_output:
+        output = f"{install_output}\n\n{output}"
     ok = process.poll() is None
     status = "running" if ok else "failed"
     updated = store.update_project_delivery_test(
@@ -1529,12 +1555,17 @@ async def git_sync(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
               "stderr": result.stderr[-1200:],
           },
       )
+    delivery = register_imported_project_delivery(destination, repo_name, mode)
     store.record_task_log(None, "master", "Git Bridge", f"git_{mode}", source, str(destination))
+    snapshot = runtime_snapshot()
+    await broadcast({"kind": "snapshot", "data": snapshot})
     return {
         "ok": True,
         "mode": mode,
         "repo": repo_name,
         "path": str(destination),
+        "delivery": delivery,
+        "snapshot": snapshot,
         "stdout": result.stdout[-1200:],
         "stderr": result.stderr[-1200:],
     }
@@ -2679,6 +2710,89 @@ def validate_project_delivery(project_path: Path) -> Dict[str, Any]:
     if not compat["ok"]:
         return compat
     return {"ok": True, "reason": "项目结构完整，Python 语法和跨语言接口兼容门禁通过，可解压后安装依赖运行。"}
+
+
+def register_imported_project_delivery(project_path: Path, repo_name: str, mode: str) -> Dict[str, Any] | None:
+    validation = inspect_imported_project_runtime(project_path)
+    if not validation["ok"]:
+        store.record_task_log(None, "master", "Git Bridge", "git_import_runtime_skipped", repo_name, validation["reason"], status="failed")
+        return None
+
+    DELIVERY_ROOT.mkdir(parents=True, exist_ok=True)
+    safe_name = safe_repo_name(repo_name)
+    package_path = DELIVERY_ROOT / f"{safe_name}-import.zip"
+    if package_path.exists():
+        package_path.unlink()
+    with zipfile.ZipFile(package_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for file_path in project_path.rglob("*"):
+            if not file_path.is_file():
+                continue
+            if any(part in INTERNAL_REPO_EXCLUDED_DIRS for part in file_path.relative_to(project_path).parts):
+                continue
+            archive.write(file_path, file_path.relative_to(project_path.parent))
+
+    return store.record_project_delivery(
+        task_id=f"git-sync:{safe_name}",
+        title=f"导入项目：{repo_name}",
+        package_name=package_path.name,
+        package_path=str(package_path),
+        project_path=str(project_path),
+        status="ready",
+        validation=f"{mode} 完成。{validation['reason']}",
+    )
+
+
+def inspect_imported_project_runtime(project_path: Path) -> Dict[str, Any]:
+    if (project_path / "package.json").exists():
+        return {"ok": True, "reason": "检测到 package.json，将按 npm dev/start 脚本启动。"}
+    if (project_path / "app" / "main.py").exists():
+        return {"ok": True, "reason": "检测到 FastAPI app/main.py，将按 uvicorn 启动。"}
+    if (project_path / "index.html").exists():
+        return {"ok": True, "reason": "检测到 index.html，将按静态网页启动。"}
+    return {"ok": False, "reason": "未检测到 package.json、index.html 或 app/main.py，暂不登记为可运行项目。"}
+
+
+def frontend_project_command(project_path: Path, port: int) -> List[str]:
+    package_path = project_path / "package.json"
+    try:
+        package_data = json.loads(package_path.read_text(encoding="utf-8"))
+    except Exception:
+        package_data = {}
+    scripts = package_data.get("scripts") if isinstance(package_data, dict) else {}
+    script_name = ""
+    if isinstance(scripts, dict):
+        if scripts.get("dev"):
+            script_name = "dev"
+        elif scripts.get("start"):
+            script_name = "start"
+    npm_exe = shutil.which("npm.cmd") or shutil.which("npm") or "npm"
+    if script_name:
+        command = [npm_exe, "run", script_name]
+        script_text = str(scripts.get(script_name) or "").lower() if isinstance(scripts, dict) else ""
+        if "vite" in script_text:
+            command.extend(["--", "--host", "127.0.0.1", "--port", str(port)])
+        return command
+    return [str(project_python_exe()), "-m", "http.server", str(port), "--bind", "127.0.0.1"]
+
+
+def install_frontend_dependencies(project_path: Path) -> str:
+    package_path = project_path / "package.json"
+    if not package_path.exists() or (project_path / "node_modules").exists():
+        return ""
+    npm_exe = shutil.which("npm.cmd") or shutil.which("npm")
+    if not npm_exe:
+        return "未找到 npm，无法安装前端依赖。"
+    result = subprocess.run(
+        [npm_exe, "install", "--no-audit", "--no-fund"],
+        cwd=str(project_path),
+        text=True,
+        capture_output=True,
+        timeout=120,
+    )
+    output = "\n".join(part for part in [result.stdout.strip(), result.stderr.strip()] if part)
+    if result.returncode != 0:
+        raise RuntimeError(f"npm install 失败：{output[-2000:]}")
+    return f"前端依赖已安装。\n{output[-1200:]}"
 
 
 def validate_cross_language_compatibility(project_path: Path) -> Dict[str, Any]:

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>QuantumFlow Desktop</title>
-    <link rel="stylesheet" href="/styles.css?v=20260605-repo-create-page" />
+    <link rel="stylesheet" href="/styles.css?v=20260605-runtime-readable-preview" />
   </head>
   <body class="auth-mode">
     <header class="desktop-chrome" id="desktopChrome" aria-label="QuantumFlow desktop titlebar">
@@ -123,7 +123,7 @@
               <option value="tester">测试</option>
               <option value="reviewer">审查</option>
             </select>
-            <button type="submit">添加</button>
+            <button type="submit">交接</button>
           </form>
           <div class="task-list" id="taskList"></div>
         </section>
@@ -159,14 +159,14 @@
           <section class="business-flow">
             <div class="flow-title">
               <span>业务流</span>
-              <strong>任务进入后，前端 Agent 和后端 Agent 同步开发，测试 Agent 验收，Reviewer 判断归属并仲裁</strong>
+              <strong>任务进入后，团队负责人生成技术书，代码负责人定向分配，Agent 按同一份技术书生成代码</strong>
             </div>
             <div class="flow-steps">
               <div class="flow-step active"><b>01</b><strong>App 入口</strong><span>企业微信 / 飞书 / 微信客服 / 抖音</span></div>
               <i></i>
               <div class="flow-step"><b>02</b><strong>任务队列</strong><span>InboundTask 转 Issue</span></div>
               <i></i>
-              <div class="flow-step"><b>03</b><strong>并行开发</strong><span>前端 Agent + 后端 Agent 同步写代码</span></div>
+              <div class="flow-step"><b>03</b><strong>技术书分发</strong><span>团队负责人交给代码负责人定向分配</span></div>
               <i></i>
               <div class="flow-step"><b>04</b><strong>测试 / 审查</strong><span>测试 Agent 验收，Reviewer 判断问题归属</span></div>
               <i></i>
@@ -234,11 +234,6 @@
 
             <section class="runtime-cockpit-body">
               <div class="runtime-floating-actions">
-                <div class="runtime-primary-actions">
-                  <button type="button" id="runtimeProjectOpenBtn">打开项目网页</button>
-                  <button type="button" id="runtimeProjectTestBtn">Agent 测试</button>
-                  <button type="button" id="runtimeProjectFixBtn">请求 Agent 纠错</button>
-                </div>
                 <div class="runtime-nav-actions">
                   <button type="button" data-runtime-open-view="warRoom">调度中枢</button>
                   <button type="button" data-runtime-open-view="community" data-runtime-world-panel="codePanel">源文明代码区</button>
@@ -277,6 +272,23 @@
                   <p id="runtimeProjectOutput">项目交付完成后，这里会联动测试运行环境、打开网页界面，并把失败日志送回 Agent 纠错。</p>
                 </section>
 
+                <section class="runtime-repo-test-panel">
+                  <div class="runtime-repo-test-head">
+                    <span>仓库测试运行</span>
+                    <strong>从仓库选择项目</strong>
+                  </div>
+                  <label>
+                    <span>项目仓库</span>
+                    <select id="runtimeRepoSelect"></select>
+                  </label>
+                  <div class="runtime-repo-test-actions">
+                    <button type="button" id="runtimeRepoTestBtn">检查入口</button>
+                    <button type="button" id="runtimeRepoPreviewBtn">运行预览</button>
+                    <button type="button" id="runtimeRepoOpenCodeBtn">打开代码</button>
+                  </div>
+                  <div class="runtime-repo-test-output" id="runtimeRepoTestOutput">选择仓库后可检查运行入口、测试文件、README 和编码问题。</div>
+                </section>
+
                 <section class="runtime-action-stack">
                   <button type="button" data-runtime-open-view="warRoom">调度任务</button>
                   <button type="button" data-runtime-open-view="community" data-runtime-world-panel="codePanel">进入代码区</button>
@@ -304,14 +316,14 @@
         <section class="community-view view-panel" id="communityView">
           <div class="open-world qf-world">
             <aside class="qf-rail">
-              <section class="qf-panel qf-repos">
-                <div class="qf-panel-head"><h3>内部仓库</h3><button type="button" id="repoQuickCreateBtn">新建仓库</button></div>
-                <input class="repo-search" type="text" placeholder="搜索仓库 / Connector / Agent..." />
-                <div class="repo-list" id="repoList"></div>
-              </section>
-              <section class="qf-panel">
+              <section class="qf-panel qf-collaborators-panel">
                 <div class="qf-panel-head"><h3>在线协作者</h3><span id="onlineMiniCount">18</span></div>
                 <div class="people-list" id="peopleList"></div>
+                <div class="collaborator-repo-head">
+                  <strong>协作仓库</strong>
+                  <button type="button" id="repoQuickCreateBtn">新建仓库</button>
+                </div>
+                <div class="repo-list collaborator-repo-list" id="repoList"></div>
               </section>
             </aside>
 
@@ -393,11 +405,65 @@
                 </div>
                 <form class="repo-create-form" id="repoCreateForm">
                   <label><span>仓库名称</span><input id="repoCreateName" type="text" placeholder="quantumflow-plugin" /></label>
-                  <label><span>描述</span><input id="repoCreateDesc" type="text" placeholder="这个仓库负责什么能力" /></label>
-                  <label><span>语言</span><input id="repoCreateLang" type="text" placeholder="Python / Vue / Webhook" /></label>
+                  <label><span>仓库类型</span><select id="repoCreateType"><option value="fullstack">全栈应用</option><option value="frontend">前端应用</option><option value="backend">后端服务</option><option value="connector">Connector / Webhook</option><option value="plugin">Agent 插件</option></select></label>
+                  <label class="repo-create-wide"><span>描述</span><input id="repoCreateDesc" type="text" placeholder="这个仓库负责什么能力、给谁使用、交付什么结果" /></label>
+                  <label><span>前端语言</span><select id="repoCreateFrontendLang"><option value="Vue 3">Vue 3</option><option value="React">React</option><option value="TypeScript">TypeScript</option><option value="JavaScript">JavaScript</option><option value="HTML / CSS">HTML / CSS</option><option value="None">不需要前端</option></select></label>
+                  <label><span>后端语言</span><select id="repoCreateBackendLang"><option value="Python / FastAPI">Python / FastAPI</option><option value="Node.js / Express">Node.js / Express</option><option value="TypeScript / NestJS">TypeScript / NestJS</option><option value="Java / Spring Boot">Java / Spring Boot</option><option value="Go">Go</option><option value="C# / ASP.NET">C# / ASP.NET</option><option value="None">不需要后端</option></select></label>
+                  <label><span>数据库</span><select id="repoCreateDatabase"><option value="SQLite" selected>SQLite（当前默认）</option><option value="PostgreSQL">PostgreSQL</option><option value="MySQL">MySQL</option><option value="Redis">Redis</option><option value="None">不需要数据库</option></select></label>
+                  <label><span>可见性</span><select id="repoCreateVisibility"><option value="internal">内部协作</option><option value="private">私有</option><option value="public">公开</option></select></label>
+                  <label><span>初始化模板</span><select id="repoCreateTemplate"><option value="readme">README + 配置文件</option><option value="fullstack">全栈目录骨架</option><option value="frontend">前端目录骨架</option><option value="backend">后端目录骨架</option><option value="connector">Connector 模板</option></select></label>
                   <div class="repo-create-actions">
                     <button type="submit">创建</button>
                     <button type="button" data-world-panel-target="repositoriesPanel">取消</button>
+                  </div>
+                </form>
+              </section>
+
+              <section class="open-world-content-panel qf-panel repo-file-create-panel" id="repoFileCreatePanel">
+                <div class="qf-panel-head">
+                  <div><span id="repoFileCreateCrumb">内部仓库 / 文件</span><h3>新建文件</h3></div>
+                  <button type="button" class="repo-back-btn" data-world-panel-target="repositoriesPanel">返回仓库</button>
+                </div>
+                <form class="repo-file-create-page" id="repoFileCreateForm">
+                  <section class="repo-file-create-card">
+                    <div class="repo-file-create-title">
+                      <span>文件信息</span>
+                      <strong id="repoFileCreateRepoName">当前仓库</strong>
+                    </div>
+                    <div class="repo-file-create-grid">
+                      <label><span>文件路径</span><input id="repoFileCreateName" type="text" placeholder="src/index.js / README.md / tests/test_api.py" /></label>
+                      <label><span>文件类型</span>
+                        <select id="repoFileCreateKind">
+                          <option value="code">代码文件</option>
+                          <option value="doc">文档说明</option>
+                          <option value="test">测试文件</option>
+                          <option value="config">配置文件</option>
+                        </select>
+                      </label>
+                      <label><span>负责 Agent</span>
+                        <select id="repoFileCreateAgent">
+                          <option value="frontend">前端 Agent</option>
+                          <option value="backend">后端 Agent</option>
+                          <option value="tester">测试 Agent</option>
+                          <option value="reviewer">Reviewer</option>
+                        </select>
+                      </label>
+                    </div>
+                  </section>
+                  <section class="repo-file-create-card">
+                    <div class="repo-file-create-title">
+                      <span>初始内容</span>
+                      <strong>创建后写入当前仓库</strong>
+                    </div>
+                    <label class="repo-file-purpose"><span>用途说明</span><input id="repoFileCreatePurpose" type="text" placeholder="这个文件负责什么模块、接口或测试场景" /></label>
+                    <label class="repo-file-body"><span>代码 / 文档内容</span><textarea id="repoFileCreateBody" placeholder="可以留空，系统会按文件类型生成一个基础模板"></textarea></label>
+                  </section>
+                  <div class="repo-file-create-actions">
+                    <label class="repo-file-open-toggle"><input id="repoFileCreateOpen" type="checkbox" checked />创建后打开代码区</label>
+                    <div>
+                      <button type="button" data-world-panel-target="repositoriesPanel">取消</button>
+                      <button type="submit">创建文件</button>
+                    </div>
                   </div>
                 </form>
               </section>
@@ -1077,7 +1143,7 @@
       </main>
     </div>
 
-    <script src="/app.js?v=20260605-repo-create-page"></script>
+    <script src="/app.js?v=20260605-runtime-readable-preview"></script>
   </body>
 </html>
 
