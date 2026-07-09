@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, ipcMain } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -136,13 +136,6 @@ ipcMain.handle("zoom:set", (event, value) => {
   const factor = saveZoomFactor(value);
   BrowserWindow.fromWebContents(event.sender)?.webContents.setZoomFactor(factor);
   return factor;
-});
-
-ipcMain.handle("browser:open-external", async (_event, url) => {
-  const target = String(url || "");
-  if (!/^https?:\/\/(127\.0\.0\.1|localhost|[\w.-]+)/i.test(target)) return false;
-  await shell.openExternal(target);
-  return true;
 });
 
 app.whenReady().then(async () => {

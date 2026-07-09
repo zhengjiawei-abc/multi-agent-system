@@ -28,6 +28,7 @@ def load_codex_provider_config() -> CodexProviderConfig | None:
     if not db_path.exists():
         return None
 
+    conn = None
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
@@ -42,10 +43,8 @@ def load_codex_provider_config() -> CodexProviderConfig | None:
     except sqlite3.Error:
         return None
     finally:
-        try:
+        if conn is not None:
             conn.close()
-        except Exception:
-            pass
 
     if not row:
         return None
@@ -82,6 +81,7 @@ def _current_codex_provider_id(cc_home: Path) -> str | None:
     db_path = cc_home / "cc-switch.db"
     if not db_path.exists():
         return None
+    conn = None
     try:
         conn = sqlite3.connect(db_path)
         row = conn.execute(
@@ -91,10 +91,8 @@ def _current_codex_provider_id(cc_home: Path) -> str | None:
     except sqlite3.Error:
         return None
     finally:
-        try:
+        if conn is not None:
             conn.close()
-        except Exception:
-            pass
 
 
 def _base_url_from_codex_config(config: dict[str, Any]) -> str | None:

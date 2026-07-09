@@ -5,6 +5,10 @@ __pycache__/
 *.pyo
 *.pyd
 
+# Test artifacts
+.tmp_test/
+.pytest_cache/
+
 # Local runtime data
 quantumflow.db
 my_db/

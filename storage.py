@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterator, List
 
 
 class SnapshotStore:
@@ -12,8 +13,22 @@ class SnapshotStore:
         self.path = Path(path)
         self._ensure_schema()
 
-    def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.path)
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        # WAL + busy timeout keep concurrent HTTP requests from hitting
+        # "database is locked"; commit/rollback then ALWAYS close so the
+        # long-running server does not leak connection handles.
+        conn = sqlite3.connect(self.path, timeout=10.0)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=10000")
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
@@ -375,6 +390,39 @@ class SnapshotStore:
                     expires_at TEXT NOT NULL,
                     FOREIGN KEY(user_id) REFERENCES app_user(id)
                 )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS project_data_item (
+                    namespace TEXT NOT NULL,
+                    data_key TEXT NOT NULL,
+                    value_json TEXT,
+                    value_text TEXT,
+                    source TEXT,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(namespace, data_key)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS project_file_snapshot (
+                    path TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    content_text TEXT,
+                    content_base64 TEXT,
+                    stored_mode TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_project_file_snapshot_kind
+                ON project_file_snapshot(kind, updated_at)
                 """
             )
 
@@ -1748,6 +1796,91 @@ class SnapshotStore:
         with self._connect() as conn:
             cursor = conn.execute("DELETE FROM user_session WHERE token = ?", (token,))
             return cursor.rowcount > 0
+
+    def upsert_project_data_item(
+        self,
+        namespace: str,
+        data_key: str,
+        value: Any = None,
+        value_text: str = "",
+        source: str = "",
+    ) -> Dict[str, Any]:
+        updated_at = datetime.now().isoformat(timespec="seconds")
+        value_json = json.dumps(value, ensure_ascii=False) if value is not None else None
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO project_data_item(namespace, data_key, value_json, value_text, source, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(namespace, data_key) DO UPDATE SET
+                    value_json = excluded.value_json,
+                    value_text = excluded.value_text,
+                    source = excluded.source,
+                    updated_at = excluded.updated_at
+                """,
+                (namespace, data_key, value_json, value_text, source, updated_at),
+            )
+        return {
+            "namespace": namespace,
+            "data_key": data_key,
+            "value": value,
+            "value_text": value_text,
+            "source": source,
+            "updated_at": updated_at,
+        }
+
+    def upsert_project_file_snapshot(
+        self,
+        path: str,
+        kind: str,
+        size_bytes: int,
+        sha256: str,
+        content_text: str | None = None,
+        content_base64: str | None = None,
+        stored_mode: str = "metadata",
+    ) -> Dict[str, Any]:
+        updated_at = datetime.now().isoformat(timespec="seconds")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO project_file_snapshot(
+                    path, kind, size_bytes, sha256, content_text, content_base64, stored_mode, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(path) DO UPDATE SET
+                    kind = excluded.kind,
+                    size_bytes = excluded.size_bytes,
+                    sha256 = excluded.sha256,
+                    content_text = excluded.content_text,
+                    content_base64 = excluded.content_base64,
+                    stored_mode = excluded.stored_mode,
+                    updated_at = excluded.updated_at
+                """,
+                (path, kind, size_bytes, sha256, content_text, content_base64, stored_mode, updated_at),
+            )
+        return {
+            "path": path,
+            "kind": kind,
+            "size_bytes": size_bytes,
+            "sha256": sha256,
+            "stored_mode": stored_mode,
+            "updated_at": updated_at,
+        }
+
+    def project_data_summary(self) -> Dict[str, Any]:
+        with self._connect() as conn:
+            item_count = conn.execute("SELECT COUNT(*) FROM project_data_item").fetchone()[0]
+            file_count = conn.execute("SELECT COUNT(*) FROM project_file_snapshot").fetchone()[0]
+            file_bytes = conn.execute("SELECT COALESCE(SUM(size_bytes), 0) FROM project_file_snapshot").fetchone()[0]
+            modes = conn.execute(
+                "SELECT stored_mode, COUNT(*) FROM project_file_snapshot GROUP BY stored_mode ORDER BY stored_mode"
+            ).fetchall()
+        return {
+            "project_data_items": item_count,
+            "project_file_snapshots": file_count,
+            "project_file_bytes": file_bytes,
+            "stored_modes": {row[0]: row[1] for row in modes},
+        }
 
     def _user_from_row(self, row: tuple[Any, ...], include_password: bool = False) -> Dict[str, Any]:
         user = {

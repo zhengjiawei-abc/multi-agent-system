@@ -534,6 +534,15 @@ const els = {
   taskForm: document.getElementById("taskForm"),
   taskInput: document.getElementById("taskInput"),
   ownerSelect: document.getElementById("ownerSelect"),
+  requirementOpenBtn: document.getElementById("requirementOpenBtn"),
+  requirementCloseBtn: document.getElementById("requirementCloseBtn"),
+  requirementDrawer: document.getElementById("requirementDrawer"),
+  requirementReaderInput: document.getElementById("requirementReaderInput"),
+  requirementReaderFile: document.getElementById("requirementReaderFile"),
+  requirementReviewBtn: document.getElementById("requirementReviewBtn"),
+  requirementReaderOutput: document.getElementById("requirementReaderOutput"),
+  requirementReviewOutput: document.getElementById("requirementReviewOutput"),
+  requirementReaderState: document.getElementById("requirementReaderState"),
   mainView: document.getElementById("mainView"),
   pageTitle: document.querySelector(".topbar h1"),
   warRoomView: document.getElementById("warRoomView"),
@@ -1490,6 +1499,7 @@ function openAgentQuickPanel(agent) {
 
   els.agentQuickPanel.style.setProperty("--quick-x", `${x}px`);
   els.agentQuickPanel.style.setProperty("--quick-y", `${y}px`);
+  els.agentQuickPanel.dataset.agentId = agent.id;
   els.agentQuickKicker.textContent = `${agent.role} / ${statusLabel(agent.status)}`;
   els.agentQuickTitle.textContent = `${agent.name} 的代码速览`;
   els.agentQuickCode.innerHTML = lines
@@ -1513,6 +1523,7 @@ function openAgentQuickPanel(agent) {
   `;
   els.agentQuickPanel.classList.add("active");
   els.agentQuickPanel.setAttribute("aria-hidden", "false");
+  document.body.classList.add("agent-quick-open");
 }
 
 function positionAgentQuickPanel(agent, width = 520, height = 360) {
@@ -1536,7 +1547,8 @@ function recordMasterTaskHistory(type, title, detail = "") {
 function generateMasterRequirementDoc(title, ownerIds = []) {
   const activeRepo = openWorldRepos.find((repo) => repo.id === activeRepoId) || openWorldRepos[0];
   const ownerNames = ownerIds.map((id) => agentById(id)?.name || id).filter(Boolean);
-  const spec = inferBusinessSpec(title || "");
+  const requirementReview = pendingMasterHandoff?.requirementReview || analyzeRequirementText(title || "");
+  const spec = requirementReview.spec || inferBusinessSpec(title || "");
   const repoName = activeRepo?.name || activeRepoId || "当前仓库";
   const targets = ownerIds
     .map((id) => {
@@ -1551,15 +1563,22 @@ function generateMasterRequirementDoc(title, ownerIds = []) {
     repoName,
     owners: ownerIds,
     ownerNames,
+    sourceText: requirementReview.rawText || title,
+    requirementReview,
     summary: `团队负责人已接收任务，并把需求固化为技术书；代码负责人只能按这份技术书定向启动执行。`,
-    scope: `围绕“${title}”完成可运行、可验收的代码变更，不允许脱离当前仓库上下文。`,
-    architecture: `当前仓库：${repoName}；领域识别：${spec.entityLabel || "通用业务"}；前端/后端/测试/审查按职责拆分。`,
-    acceptance: [
+    scope: requirementReview.scope || `围绕“${title}”完成可运行、可验收的代码变更，不允许脱离当前仓库上下文。`,
+    architecture: `当前仓库：${repoName}；领域识别：${spec.entityLabel || "通用业务"}；业务类型：${requirementReview.domainLabel || spec.domain}；前端/后端/测试/审查按职责拆分。`,
+    acceptance: requirementReview.acceptance?.length
+      ? requirementReview.acceptance
+      : [
       "每个 Agent 只写入自己职责范围内的文件。",
       "生成结果必须能运行，不能只生成静态说明。",
       "测试 Agent 必须补充验收或烟测入口。",
       "Reviewer 审核通过后才能打包回团队负责人交付。",
     ],
+    userStories: requirementReview.userStories || [],
+    constraints: requirementReview.constraints || [],
+    risks: requirementReview.risks || [],
     targets,
   };
 }
@@ -1574,6 +1593,9 @@ function renderRequirementDoc(doc) {
     `职责文件：${doc.targets || "待代码负责人定位"}`,
     `范围：${doc.scope}`,
     `架构：${doc.architecture}`,
+    ...(doc.userStories?.length ? ["用户/场景：", ...doc.userStories.map((item) => `- ${item}`)] : []),
+    ...(doc.constraints?.length ? ["约束：", ...doc.constraints.map((item) => `- ${item}`)] : []),
+    ...(doc.risks?.length ? ["风险：", ...doc.risks.map((item) => `- ${item}`)] : []),
     "验收标准：",
     ...(doc.acceptance || []).map((item) => `- ${item}`),
   ].join("\n");
@@ -1593,6 +1615,8 @@ function prependRequirementContext(lines, taskLike = {}, agentName = "Agent", fi
     comment(`执行 Agent：${agentName}`),
     comment(`目标文件：${fileName}`),
     comment(`任务范围：${taskLike.requirementDoc.scope}`),
+    ...(taskLike.requirementDoc.userStories || []).slice(0, 3).map((item) => comment(`业务场景：${item}`)),
+    ...(taskLike.requirementDoc.constraints || []).slice(0, 3).map((item) => comment(`约束：${item}`)),
     comment(`验收：${(taskLike.requirementDoc.acceptance || []).join("；")}`),
     "",
   ];
@@ -1601,6 +1625,7 @@ function prependRequirementContext(lines, taskLike = {}, agentName = "Agent", fi
 
 function openMasterHistoryPanel(agent) {
   positionAgentQuickPanel(agent, 560, 370);
+  els.agentQuickPanel.dataset.agentId = agent.id;
   const rows = masterTaskHistory.length
     ? masterTaskHistory
         .map(
@@ -1626,6 +1651,7 @@ function openMasterHistoryPanel(agent) {
   els.agentQuickEditorBtn.textContent = "打开代码区";
   els.agentQuickPanel.classList.add("active", "master-history-mode");
   els.agentQuickPanel.setAttribute("aria-hidden", "false");
+  document.body.classList.add("agent-quick-open");
 }
 
 function openReviewerDispatchPanel(agent) {
@@ -1633,13 +1659,14 @@ function openReviewerDispatchPanel(agent) {
   const reviewTasks = tasks.filter((item) => item.status === "review");
   const workerTasks = tasks.filter((item) => item.requiresReview && !item.reviewerIntake && ["active", "assigned", "pending", "review", "done"].includes(item.status));
   const candidates = [...intakeTasks, ...workerTasks, ...reviewTasks.filter((item) => !workerTasks.includes(item))];
-  const panelWidth = 600;
-  const panelHeight = 390;
-  const x = Math.max(18, Math.min(agent.x - 500, 1280 - panelWidth));
-  const y = Math.max(18, Math.min(agent.y - 120, 600 - panelHeight));
+  const panelWidth = Math.min(430, Math.max(360, window.innerWidth - 32));
+  const panelHeight = Math.min(420, Math.max(310, window.innerHeight - 116));
+  const x = Math.max(12, window.innerWidth - panelWidth - 18);
+  const y = Math.max(84, Math.min(agent.y - 104, window.innerHeight - panelHeight - 16));
 
   els.agentQuickPanel.style.setProperty("--quick-x", `${x}px`);
   els.agentQuickPanel.style.setProperty("--quick-y", `${y}px`);
+  els.agentQuickPanel.dataset.agentId = agent.id;
   els.agentQuickKicker.textContent = `${agent.role} / 接收与启动`;
   els.agentQuickTitle.textContent = "代码审查者的任务启动台";
   els.agentQuickCode.innerHTML = `
@@ -1690,10 +1717,12 @@ function openReviewerDispatchPanel(agent) {
   els.agentQuickEditorBtn.textContent = "打开代码区";
   els.agentQuickPanel.classList.add("active", "reviewer-dispatch-mode");
   els.agentQuickPanel.setAttribute("aria-hidden", "false");
+  document.body.classList.add("agent-quick-open");
 }
 
 function openMasterDeliveryPanel(agent, task) {
   positionAgentQuickPanel(agent, 540, 330);
+  els.agentQuickPanel.dataset.agentId = agent.id;
   els.agentQuickKicker.textContent = `${agent.role} / 待交付`;
   els.agentQuickTitle.textContent = "团队负责人的交付台";
   els.agentQuickCode.innerHTML = `
@@ -1713,6 +1742,7 @@ function openMasterDeliveryPanel(agent, task) {
   els.agentQuickEditorBtn.textContent = "查看交付代码";
   els.agentQuickPanel.classList.add("active", "master-delivery-mode");
   els.agentQuickPanel.setAttribute("aria-hidden", "false");
+  document.body.classList.add("agent-quick-open");
 }
 
 function closeAgentQuickPanel() {
@@ -1721,11 +1751,14 @@ function closeAgentQuickPanel() {
   els.agentQuickPanel?.classList.remove("master-delivery-mode");
   els.agentQuickPanel?.classList.remove("master-history-mode");
   els.agentQuickPanel?.setAttribute("aria-hidden", "true");
+  if (els.agentQuickPanel) els.agentQuickPanel.dataset.agentId = "";
   if (els.agentQuickEditorBtn) els.agentQuickEditorBtn.textContent = "进入完整编辑器";
+  document.body.classList.remove("agent-quick-open");
 }
 
 function openSelectedAgentEditor() {
-  const agent = agentById(selectedAgentId);
+  const panelAgent = els.agentQuickPanel?.dataset.agentId || selectedAgentId;
+  const agent = agentById(panelAgent) || agentById(selectedAgentId) || agentById("frontend");
   closeAgentQuickPanel();
   jumpAgentToCodeArea(agent);
 }
@@ -1992,7 +2025,10 @@ function deliverMasterTask(taskKey) {
 function jumpAgentToCodeArea(agent) {
   if (!agent) return;
   const activeTask = tasks.find((item) => item.owner === agent.id && ["active", "blocked", "pending", "assigned", "review", "done"].includes(item.status));
+  selectedAgentId = agent.id;
   focusAgentCodeTarget(agent.id, activeTask?.workflowTitle || activeTask?.title || "");
+  switchView("community", { worldPanel: "codePanel" });
+  switchOpenWorldPanel("codePanel");
   openAutoCodeWorkspace(activeRepoId, activeFileName);
   pushComment(agent.name, `已打开 ${activeFileName} 的自动编码工作区，Agent 会基于当前任务继续生成代码。`);
 }
@@ -2081,6 +2117,11 @@ function renderTasks() {
         ${
           task.requirementDoc
             ? `<div class="task-requirement-chip"><span>${escapeHtml(task.requirementDoc.id)}</span><em>${escapeHtml(task.reviewerIntake ? `交给代码负责人 / ${directedOwnersText(task.suggestedOwners)}` : `按技术书执行 / ${agentById(task.owner)?.name || task.owner}`)}</em></div>`
+            : ""
+        }
+        ${
+          task.reviewerIntake && task.status === "pending"
+            ? `<button class="task-inline-action" type="button" data-reviewer-quick-run="${escapeHtml(task.localWorkflowId || task.id)}">接收执行</button>`
             : ""
         }
       </div>
@@ -4975,7 +5016,9 @@ function inferBusinessSpec(title) {
     ownerLabel: "负责人",
     seedItems: ["需求确认", "执行推进", "结果验收"],
   };
-  if (/(图书|图书馆|书籍|借阅|library|book)/.test(text)) {
+  const librarySignal = /(图书|图书馆|书籍|借阅|馆藏|库存|归还|library|book|catalog|isbn)/.test(text)
+    || (/(langchain|faiss|gpt-?4v|embedding|semantic|redis|mysql)/.test(text) && /(fastapi|python|vue|api|后端|检索|识别|多模态)/.test(text));
+  if (librarySignal) {
     return {
       ...base,
       domain: "library",
@@ -5004,6 +5047,99 @@ function inferBusinessSpec(title) {
 
 function isVue3FrontendSpec(spec) {
   return spec.scope === "frontend_only" && spec.framework === "vue3";
+}
+
+function analyzeRequirementText(rawText = "") {
+  const text = String(rawText || "").trim();
+  const spec = inferBusinessSpec(text);
+  const normalized = text.replace(/\s+/g, " ");
+  const title = requirementTitleFromText(text, spec);
+  const featureHints = [
+    ["登录/权限", /(登录|注册|权限|角色|用户|账号|auth|login)/i],
+    ["列表/检索", /(列表|搜索|筛选|排序|分页|查询|filter|search)/i],
+    ["表单/编辑", /(新增|创建|编辑|修改|删除|表单|录入|submit|form)/i],
+    ["状态流转", /(状态|审批|流转|待办|完成|驳回|审核|review)/i],
+    ["数据持久化", /(数据库|存储|mysql|sqlite|持久化|保存|数据)/i],
+    ["借阅/库存", /(借阅|归还|馆藏|库存|入库|book|library)/i],
+    ["多模态/语义检索", /(多模态|封面|识别|gpt-4v|langchain|faiss|语义|向量|embedding)/i],
+    ["运行预览", /(运行|预览|部署|启动|页面|界面|web ui)/i],
+  ];
+  const features = featureHints.filter(([, pattern]) => pattern.test(text)).map(([label]) => label);
+  if (!features.length) features.push(`${spec.entityLabel || "业务"}管理`, "基础增删改查", "验收反馈");
+  const acceptance = extractRequirementBullets(text, /(验收|完成标准|acceptance|测试|必须|需要|应当|要)/i);
+  const constraints = extractRequirementBullets(text, /(约束|限制|不能|不要|必须|技术栈|兼容|安全|权限|性能)/i);
+  const risks = [];
+  if (text.length < 40) risks.push("需求文本偏短，Agent 可能只能生成通用模板。");
+  if (!/(验收|测试|通过|标准|acceptance)/i.test(text)) risks.push("缺少明确验收标准，已补充基础运行和 Review 门禁。");
+  if (!/(用户|角色|管理员|客户|负责人|agent|开发者)/i.test(text)) risks.push("缺少目标用户或角色描述，技术书会要求先明确默认角色。");
+  const owners = recommendRequirementOwners(text, spec);
+  return {
+    rawText: text,
+    title,
+    spec,
+    domainLabel: spec.entityLabel || "通用业务",
+    features,
+    owners,
+    confidence: Math.min(96, Math.max(45, 54 + features.length * 7 + acceptance.length * 6 - risks.length * 8)),
+    scope: `围绕“${title}”实现：${features.join("、")}；需求原文长度 ${text.length} 字，必须以需求理解和验收标准驱动代码。`,
+    userStories: [
+      `作为${spec.ownerLabel || "业务负责人"}，我需要围绕${spec.entityLabel || "业务事项"}完成核心操作。`,
+      `作为使用者，我需要页面/接口能直接运行，并能看到真实状态反馈。`,
+    ],
+    acceptance: [
+      ...acceptance,
+      "实现必须贴合需求文本，不允许生成无关通用模板。",
+      "运行入口、核心交互、异常/空状态和 Review 记录必须完整。",
+      "测试 Agent 需要基于需求文本补充可执行或可检查的验收点。",
+    ].slice(0, 8),
+    constraints: [
+      ...constraints,
+      "所有 Agent 必须引用同一份技术书，不允许各写各的理解。",
+    ].slice(0, 6),
+    risks,
+    summary: `识别为${spec.entityLabel || "通用业务"}需求，建议 ${owners.map((id) => agentById(id)?.name || id).join("、")} 参与。`,
+  };
+}
+
+function requirementTitleFromText(text, spec) {
+  const firstLine = text.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "";
+  const cleaned = firstLine.replace(/^(需求|标题|任务|prd|#)+[:：\s-]*/i, "").slice(0, 42);
+  if (cleaned.length >= 6) return cleaned;
+  return `${spec.entityLabel || "业务"}需求实现`;
+}
+
+function extractRequirementBullets(text, sectionPattern) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^[-*·\d.、\s]+/, ""))
+    .filter((line) => line.length >= 6 && line.length <= 120);
+  return lines.filter((line) => sectionPattern.test(line)).slice(0, 4);
+}
+
+function recommendRequirementOwners(text, spec) {
+  const owners = new Set(["frontend", "tester", "reviewer"]);
+  if (spec.scope !== "frontend_only" || /(后端|接口|api|数据库|mysql|sqlite|服务|鉴权|权限)/i.test(text)) owners.add("backend");
+  return [...owners];
+}
+
+function renderRequirementReview(review) {
+  if (!review) {
+    if (els.requirementReaderOutput) els.requirementReaderOutput.textContent = "打开需求工作台";
+    if (els.requirementReviewOutput) els.requirementReviewOutput.textContent = "等待需求文本。";
+    return;
+  }
+  if (els.requirementReaderOutput) {
+    els.requirementReaderOutput.textContent = `${review.confidence}% / ${review.features.slice(0, 2).join("、")}`;
+  }
+  if (!els.requirementReviewOutput) return;
+  els.requirementReviewOutput.innerHTML = `
+    <strong>${escapeHtml(review.title)}</strong>
+    <span>理解置信度 ${escapeHtml(String(review.confidence))}% / ${escapeHtml(review.summary)}</span>
+    <ul>
+      ${review.features.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+      ${review.risks.map((item) => `<li class="warn">${escapeHtml(item)}</li>`).join("")}
+    </ul>
+  `;
 }
 
 function vue3BookSeedItems() {
@@ -5241,6 +5377,22 @@ function preferredProjectEntryFile(taskLike = {}) {
 
 function businessModelForSpec(spec, title = "") {
   const models = {
+    library: {
+      appName: "多模态智能图书馆管理系统",
+      entity: "图书",
+      apiBase: "books",
+      peopleApi: "readers",
+      actor: "author",
+      actorLabel: "作者",
+      ownerLabel: "馆藏管理员",
+      statuses: ["在馆", "借出", "预约", "维护"],
+      fields: ["title", "author", "category", "publisher", "publishDate", "status"],
+      seed: [
+        { title: "人月神话", author: "Frederick P. Brooks", department: "软件工程", amount: "-", reason: "软件工程经典", status: "在馆" },
+        { title: "代码大全", author: "Steve McConnell", department: "编程实践", amount: "-", reason: "代码质量与构建实践", status: "借出" },
+        { title: "深入理解计算机系统", author: "Randal E. Bryant", department: "计算机系统", amount: "-", reason: "系统结构与程序执行", status: "预约" },
+      ],
+    },
     oa: {
       appName: "OA 协同办公系统",
       entity: "审批单",
@@ -5485,6 +5637,243 @@ function autonomousAgentArtifactLines(agentId, taskLike = {}, fileName = "", tas
   ];
 }
 
+function libraryFullstackArtifactLines(agentId, fileName, taskId, title, requirementDoc = null) {
+  const lower = fileName.toLowerCase();
+  const books = JSON.stringify(vue3BookSeedItems(), null, 2);
+  const reqSummary = sanitizeCodeText(requirementDoc?.scope || "图书检索、馆藏管理、借阅状态流转和智能检索占位。");
+  if (agentId === "backend" || lower.endsWith("app/main.py")) {
+    return [
+      "from __future__ import annotations",
+      "",
+      "from fastapi import FastAPI, HTTPException, Query",
+      "from pydantic import BaseModel, Field",
+      "",
+      "app = FastAPI(title=\"多模态智能图书馆管理系统\")",
+      "",
+      "class BookCreate(BaseModel):",
+      "    title: str = Field(min_length=1, max_length=120)",
+      "    author: str = Field(min_length=1, max_length=80)",
+      "    category: str = \"综合\"",
+      "    publisher: str = \"未知出版社\"",
+      "    publishDate: str = \"2026\"",
+      "    status: str = \"在馆\"",
+      "    summary: str = \"\"",
+      "",
+      "books = [",
+      "    {\"id\": 1, \"accessionNo\": \"B-2026-001\", \"title\": \"人月神话\", \"author\": \"Frederick P. Brooks\", \"category\": \"软件工程\", \"publisher\": \"Addison-Wesley\", \"publishDate\": \"1975\", \"status\": \"在馆\", \"summary\": \"软件工程经典。\", \"embeddingTags\": [\"工程\", \"管理\"]},",
+      "    {\"id\": 2, \"accessionNo\": \"B-2026-002\", \"title\": \"代码大全\", \"author\": \"Steve McConnell\", \"category\": \"编程实践\", \"publisher\": \"Microsoft Press\", \"publishDate\": \"2004\", \"status\": \"借出\", \"summary\": \"代码构建实践。\", \"embeddingTags\": [\"代码\", \"质量\"]},",
+      "    {\"id\": 3, \"accessionNo\": \"B-2026-003\", \"title\": \"深入理解计算机系统\", \"author\": \"Randal E. Bryant\", \"category\": \"计算机系统\", \"publisher\": \"Pearson\", \"publishDate\": \"2015\", \"status\": \"预约\", \"summary\": \"系统结构与程序执行。\", \"embeddingTags\": [\"系统\", \"底层\"]},",
+      "]",
+      "allowed_status = {\"在馆\", \"借出\", \"预约\", \"维护\"}",
+      "",
+      "@app.get(\"/api/health\")",
+      "def health():",
+      `    return {\"ok\": True, \"service\": \"library\", \"task_id\": \"${taskId}\", \"scope\": \"${reqSummary}\"}`,
+      "",
+      "@app.get(\"/api/books\")",
+      "def list_books(q: str = \"\", category: str = \"全部\", status: str = \"全部\"):",
+      "    query = q.strip().lower()",
+      "    result = books",
+      "    if query:",
+      "        result = [book for book in result if query in f\"{book['title']} {book['author']} {book['category']} {book['summary']}\".lower()]",
+      "    if category != \"全部\":",
+      "        result = [book for book in result if book[\"category\"] == category]",
+      "    if status != \"全部\":",
+      "        result = [book for book in result if book[\"status\"] == status]",
+      "    return result",
+      "",
+      "@app.get(\"/api/books/stats\")",
+      "def book_stats():",
+      "    return {",
+      "        \"total\": len(books),",
+      "        \"available\": sum(1 for book in books if book[\"status\"] == \"在馆\"),",
+      "        \"borrowed\": sum(1 for book in books if book[\"status\"] == \"借出\"),",
+      "        \"reserved\": sum(1 for book in books if book[\"status\"] == \"预约\"),",
+      "        \"categories\": sorted({book[\"category\"] for book in books}),",
+      "    }",
+      "",
+      "@app.post(\"/api/books\")",
+      "def create_book(payload: BookCreate):",
+      "    if payload.status not in allowed_status:",
+      "        raise HTTPException(status_code=400, detail=\"invalid book status\")",
+      "    next_id = max([book[\"id\"] for book in books] + [0]) + 1",
+      "    item = {\"id\": next_id, \"accessionNo\": f\"B-2026-{next_id:03d}\", \"embeddingTags\": [payload.category], **payload.model_dump()}",
+      "    books.insert(0, item)",
+      "    return item",
+      "",
+      "@app.patch(\"/api/books/{book_id}/status\")",
+      "def update_book_status(book_id: int, status: str):",
+      "    if status not in allowed_status:",
+      "        raise HTTPException(status_code=400, detail=\"invalid book status\")",
+      "    for book in books:",
+      "        if book[\"id\"] == book_id:",
+      "            book[\"status\"] = status",
+      "            return book",
+      "    raise HTTPException(status_code=404, detail=\"book not found\")",
+      "",
+      "@app.get(\"/api/books/semantic-search\")",
+      "def semantic_search(q: str = Query(..., min_length=1)):",
+      "    query = q.lower()",
+      "    ranked = sorted(books, key=lambda book: sum(tag.lower() in query or query in tag.lower() for tag in book.get(\"embeddingTags\", [])), reverse=True)",
+      "    return [{\"score\": 0.92 if index == 0 else 0.72, **book} for index, book in enumerate(ranked[:5])]",
+    ];
+  }
+  if (agentId === "frontend" || lower.endsWith("app/static/app.js")) {
+    return [
+      "const state = { books: [], stats: {}, q: \"\", category: \"全部\", status: \"全部\", semantic: \"\", semanticHits: [] };",
+      "const statuses = [\"全部\", \"在馆\", \"借出\", \"预约\", \"维护\"];",
+      "const fallbackBooks = " + books + ";",
+      "",
+      "function injectLibraryStyles() {",
+      "  if (document.getElementById(\"libraryGeneratedStyles\")) return;",
+      "  const style = document.createElement(\"style\");",
+      "  style.id = \"libraryGeneratedStyles\";",
+      "  style.textContent = `*{box-sizing:border-box}body{margin:0;background:#eef3f8;color:#172033;font-family:'Segoe UI','Microsoft YaHei',Arial,sans-serif}button,input,select{font:inherit}.library-admin-app{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100vh}.library-sidebar{background:#123f61;color:#fff;padding:18px 14px;display:grid;align-content:start;gap:10px}.library-sidebar strong{font-size:18px;margin-bottom:8px}.library-sidebar button{height:38px;border:1px solid rgba(255,255,255,.16);border-radius:6px;background:#18577f;color:#eaf7ff;text-align:left;padding:0 10px;cursor:pointer}.library-sidebar button.active{background:#1d8bc8}.library-main{min-width:0;padding:18px 22px}.library-topbar{height:64px;display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid #c4d5e3;border-radius:8px;padding:0 18px;margin-bottom:14px}.library-topbar h1{margin:0;font-size:24px}.library-topbar span{color:#496272;font-size:13px}.library-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}.library-stats article,.library-toolbar,.library-form,.semantic-box,.library-table-wrap,.semantic-results article{background:#fff;border:1px solid #c4d5e3;border-radius:8px;padding:12px}.library-stats b{display:block;font-size:26px;color:#0d6694}.library-stats span{color:#526575;font-size:12px}.library-toolbar,.library-form,.semantic-box{display:grid;grid-template-columns:minmax(240px,1fr) 180px 160px 100px;gap:10px;margin-bottom:10px}.library-form{grid-template-columns:repeat(4,minmax(130px,1fr)) 130px 90px}.semantic-box{grid-template-columns:minmax(260px,1fr) 120px}input,select{height:36px;border:1px solid #a8bdcc;border-radius:6px;background:#fff;color:#172033;padding:0 10px}.library-toolbar button,.library-form button,.semantic-box button,.library-table button{height:36px;border:1px solid #7fa6bf;background:#e7f2f8;color:#123f61;border-radius:6px;cursor:pointer;font-weight:700}.library-table{width:100%;border-collapse:collapse;font-size:13px}.library-table th{background:#dce8f1;color:#17324a;border-bottom:1px solid #a7bbc9;text-align:left;padding:9px}.library-table td{border-bottom:1px solid #d8e3ec;padding:9px;vertical-align:middle}.library-table b{color:#08795f}.library-table td:last-child{display:flex;flex-wrap:wrap;gap:6px}.semantic-results{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:12px}.semantic-results strong,.semantic-results span{display:block}.semantic-results span{color:#526575;font-size:12px;margin-top:4px}@media(max-width:900px){.library-admin-app{grid-template-columns:1fr}.library-sidebar{display:none}.library-stats,.library-toolbar,.library-form,.semantic-box{grid-template-columns:1fr}.library-table-wrap{overflow:auto}.library-table{min-width:760px}}`;",
+      "  document.head.appendChild(style);",
+      "}",
+      "",
+      "async function api(path, options = {}) {",
+      "  const response = await fetch(path, { ...options, headers: { \"Content-Type\": \"application/json\", ...(options.headers || {}) } });",
+      "  if (!response.ok) throw new Error(`HTTP ${response.status}`);",
+      "  return response.json();",
+      "}",
+      "async function loadBooks() {",
+      "  const params = new URLSearchParams({ q: state.q, category: state.category, status: state.status });",
+      "  try {",
+      "    state.books = await api(`/api/books?${params}`);",
+      "    state.stats = await api(\"/api/books/stats\");",
+      "  } catch {",
+      "    state.books = fallbackBooks.map((book, index) => ({ id: index + 1, ...book }));",
+      "    state.stats = { total: state.books.length, available: 1, borrowed: 1, reserved: 1, categories: [...new Set(state.books.map((book) => book.category))] };",
+      "  }",
+      "  renderLibrary();",
+      "}",
+      "async function createBook(event) {",
+      "  event.preventDefault();",
+      "  const form = new FormData(event.currentTarget);",
+      "  const payload = Object.fromEntries(form.entries());",
+      "  await api(\"/api/books\", { method: \"POST\", body: JSON.stringify(payload) }).catch(() => state.books.unshift({ id: Date.now(), accessionNo: \"LOCAL\", ...payload }));",
+      "  event.currentTarget.reset();",
+      "  await loadBooks();",
+      "}",
+      "async function setBookStatus(id, status) {",
+      "  await api(`/api/books/${id}/status?status=${encodeURIComponent(status)}`, { method: \"PATCH\" }).catch(() => { const book = state.books.find((item) => item.id === id); if (book) book.status = status; });",
+      "  await loadBooks();",
+      "}",
+      "async function semanticSearch() {",
+      "  if (!state.semantic.trim()) return;",
+      "  state.semanticHits = await api(`/api/books/semantic-search?q=${encodeURIComponent(state.semantic)}`).catch(() => state.books.slice(0, 3).map((book) => ({ score: 0.72, ...book })));",
+      "  renderLibrary();",
+      "}",
+      "function renderLibrary() {",
+      "  injectLibraryStyles();",
+      "  const root = document.getElementById(\"app\") || document.body;",
+      "  const categories = [\"全部\", ...(state.stats.categories || [...new Set(state.books.map((book) => book.category))])];",
+      "  root.innerHTML = `",
+      "    <main class=\"library-admin-app\">",
+      "      <aside><strong>智能图书馆</strong><button class=\"active\">馆藏</button><button>借阅</button><button>语义检索</button><button>报表</button></aside>",
+      "      <section class=\"library-main\">",
+      "        <header><h1>多模态智能图书馆管理系统</h1><span>Python + FastAPI / Semantic Ready</span></header>",
+      "        <div class=\"library-stats\"><article><b>${state.stats.total || state.books.length}</b><span>馆藏</span></article><article><b>${state.stats.available || 0}</b><span>在馆</span></article><article><b>${state.stats.borrowed || 0}</b><span>借出</span></article><article><b>${state.stats.reserved || 0}</b><span>预约</span></article></div>",
+      "        <div class=\"library-toolbar\"><input id=\"q\" placeholder=\"搜索书名、作者、分类\" value=\"${escapeHtml(state.q)}\"/><select id=\"category\">${categories.map((item) => `<option ${item === state.category ? 'selected' : ''}>${item}</option>`).join('')}</select><select id=\"status\">${statuses.map((item) => `<option ${item === state.status ? 'selected' : ''}>${item}</option>`).join('')}</select><button id=\"filterBtn\">筛选</button></div>",
+      "        <form id=\"bookForm\" class=\"library-form\"><input name=\"title\" placeholder=\"书名\" required/><input name=\"author\" placeholder=\"作者\" required/><input name=\"category\" placeholder=\"分类\"/><input name=\"publisher\" placeholder=\"出版社\"/><select name=\"status\"><option>在馆</option><option>借出</option><option>预约</option><option>维护</option></select><button>入库</button></form>",
+      "        <div class=\"semantic-box\"><input id=\"semanticInput\" placeholder=\"语义检索：例如 系统底层 / 代码质量\" value=\"${escapeHtml(state.semantic)}\"/><button id=\"semanticBtn\">智能检索</button></div>",
+      "        <table class=\"library-table\"><thead><tr><th>编号</th><th>书名</th><th>作者</th><th>分类</th><th>状态</th><th>操作</th></tr></thead><tbody>${state.books.map(renderBookRow).join('')}</tbody></table>",
+      "        <section class=\"semantic-results\">${state.semanticHits.map((book) => `<article><strong>${book.title}</strong><span>score ${book.score} / ${book.summary || ''}</span></article>`).join('')}</section>",
+      "      </section>",
+      "    </main>`;",
+      "  document.getElementById(\"bookForm\")?.addEventListener(\"submit\", createBook);",
+      "  document.getElementById(\"filterBtn\")?.addEventListener(\"click\", () => { state.q = document.getElementById(\"q\").value; state.category = document.getElementById(\"category\").value; state.status = document.getElementById(\"status\").value; loadBooks(); });",
+      "  document.getElementById(\"semanticBtn\")?.addEventListener(\"click\", () => { state.semantic = document.getElementById(\"semanticInput\").value; semanticSearch(); });",
+      "}",
+      "function renderBookRow(book) {",
+      "  const buttons = [\"在馆\", \"借出\", \"预约\", \"维护\"].map((status) => `<button onclick=\"setBookStatus(${book.id}, '${status}')\">${status}</button>`).join('');",
+      "  return `<tr><td>${book.accessionNo || book.id}</td><td>${escapeHtml(book.title)}</td><td>${escapeHtml(book.author)}</td><td>${escapeHtml(book.category)}</td><td><b>${escapeHtml(book.status)}</b></td><td>${buttons}</td></tr>`;",
+      "}",
+      "function escapeHtml(value) { return String(value || \"\").replace(/[&<>\"']/g, (char) => ({ \"&\": \"&amp;\", \"<\": \"&lt;\", \">\": \"&gt;\", '\"': \"&quot;\", \"'\": \"&#039;\" }[char])); }",
+      "loadBooks();",
+    ];
+  }
+  if (lower.endsWith("app/static/styles.css")) {
+    return [
+      ":root { font-family: 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif; color: #172033; background: #e7eef5; }",
+      "* { box-sizing: border-box; }",
+      "body { margin: 0; min-height: 100vh; background: #e7eef5; }",
+      "button, input, select { font: inherit; }",
+      ".library-admin-app { display: grid; grid-template-columns: 210px minmax(0, 1fr); min-height: 100vh; }",
+      ".library-admin-app aside { background: #123f61; color: #fff; padding: 18px 14px; display: grid; align-content: start; gap: 10px; }",
+      ".library-admin-app aside strong { font-size: 18px; margin-bottom: 8px; }",
+      ".library-admin-app aside button { height: 36px; border: 1px solid rgba(255,255,255,.16); border-radius: 6px; background: #18577f; color: #eaf7ff; text-align: left; padding: 0 10px; }",
+      ".library-admin-app aside button.active { background: #1d8bc8; }",
+      ".library-main { min-width: 0; padding: 18px 22px; }",
+      ".library-main header { display: flex; justify-content: space-between; align-items: center; background: #fff; border: 1px solid #c3d4e2; padding: 14px 16px; margin-bottom: 14px; }",
+      ".library-main h1 { margin: 0; font-size: 24px; }",
+      ".library-main header span { color: #496272; font-size: 13px; }",
+      ".library-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }",
+      ".library-stats article, .library-toolbar, .library-form, .semantic-box, .semantic-results article { background: #fff; border: 1px solid #c3d4e2; border-radius: 7px; padding: 12px; }",
+      ".library-stats b { display: block; font-size: 24px; color: #0d6694; }",
+      ".library-stats span { color: #526575; font-size: 12px; }",
+      ".library-toolbar, .library-form, .semantic-box { display: grid; grid-template-columns: minmax(240px, 1fr) 180px 160px 100px; gap: 10px; margin-bottom: 10px; }",
+      ".library-form { grid-template-columns: repeat(4, minmax(130px, 1fr)) 130px 90px; }",
+      ".semantic-box { grid-template-columns: minmax(260px, 1fr) 120px; }",
+      ".library-toolbar input, .library-toolbar select, .library-form input, .library-form select, .semantic-box input { height: 34px; border: 1px solid #a8bdcc; background: #fff; color: #172033; padding: 0 9px; }",
+      ".library-toolbar button, .library-form button, .semantic-box button, .library-table button { height: 34px; border: 1px solid #7fa6bf; background: #e7f2f8; color: #123f61; border-radius: 5px; cursor: pointer; }",
+      ".library-table { width: 100%; border-collapse: collapse; background: #fff; font-size: 12px; }",
+      ".library-table th { background: #dce8f1; color: #17324a; border: 1px solid #a7bbc9; text-align: left; padding: 8px; }",
+      ".library-table td { border: 1px solid #bdd0dc; padding: 7px; vertical-align: middle; }",
+      ".library-table b { color: #08795f; }",
+      ".library-table td:last-child { display: flex; flex-wrap: wrap; gap: 6px; }",
+      ".semantic-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 12px; }",
+      ".semantic-results strong, .semantic-results span { display: block; }",
+      ".semantic-results span { color: #526575; font-size: 12px; margin-top: 4px; }",
+      "@media (max-width: 900px) { .library-admin-app { grid-template-columns: 1fr; } .library-admin-app aside { display: none; } .library-stats, .library-toolbar, .library-form, .semantic-box { grid-template-columns: 1fr; } .library-table { display: block; overflow: auto; white-space: nowrap; } }",
+    ];
+  }
+  if (agentId === "tester" || lower.endsWith("tests/test_smoke.py")) {
+    return [
+      "from fastapi.testclient import TestClient",
+      "from app.main import app",
+      "",
+      "client = TestClient(app)",
+      "",
+      "def test_library_health_and_catalog():",
+      "    health = client.get(\"/api/health\").json()",
+      "    assert health[\"service\"] == \"library\"",
+      "    books = client.get(\"/api/books\").json()",
+      "    assert any(book[\"title\"] == \"人月神话\" for book in books)",
+      "    assert client.get(\"/api/books/stats\").json()[\"total\"] >= 3",
+      "",
+      "def test_create_filter_and_status_flow():",
+      "    created = client.post(\"/api/books\", json={\"title\": \"Python 深度学习\", \"author\": \"Francois Chollet\", \"category\": \"AI\", \"publisher\": \"Manning\"}).json()",
+      "    assert created[\"status\"] == \"在馆\"",
+      "    filtered = client.get(\"/api/books\", params={\"q\": \"Python\", \"category\": \"AI\"}).json()",
+      "    assert any(book[\"title\"] == \"Python 深度学习\" for book in filtered)",
+      "    updated = client.patch(f\"/api/books/{created['id']}/status\", params={\"status\": \"借出\"}).json()",
+      "    assert updated[\"status\"] == \"借出\"",
+      "",
+      "def test_semantic_search_contract():",
+      "    hits = client.get(\"/api/books/semantic-search\", params={\"q\": \"系统 底层\"}).json()",
+      "    assert len(hits) >= 1",
+      "    assert \"score\" in hits[0]",
+    ];
+  }
+  if (agentId === "reviewer" || lower.endsWith("docs/review-checklist.md")) {
+    return [
+      "# 多模态智能图书馆 Reviewer 审查清单",
+      "",
+      `- 任务 ID：${taskId}`,
+      `- 需求范围：${reqSummary}`,
+      "",
+      "## 必须通过",
+      "- [x] 后端生成图书馆领域 API，而不是通用 /api/tasks 看板。",
+      "- [x] 包含 `/api/books`、`/api/books/stats`、`/api/books/{id}/status`、`/api/books/semantic-search`。",
+      "- [x] 前端呈现馆藏、借阅状态、筛选、入库、语义检索，而不是待处理卡片。",
+      "- [x] 测试覆盖图书创建、筛选、状态流转和语义检索契约。",
+    ];
+  }
+  return null;
+}
+
 function oaSystemArtifactLines(agentId, fileName, taskId, title) {
   const lower = fileName.toLowerCase();
   if (agentId === "tester" || lower.includes("test") || lower.includes("spec")) {
@@ -5614,11 +6003,14 @@ function oaSystemArtifactLines(agentId, fileName, taskId, title) {
 function buildAgentArtifactLines(agentId, taskLike = {}, fileName = "") {
   const agent = agentById(agentId) || { id: agentId, role: "Agent", name: agentId };
   const taskId = sanitizeCodeText(taskLike.id || taskLike.backendId || `local-${Date.now().toString(36)}`);
-  const title = sanitizeCodeText(taskLike.title || "QuantumFlow 自动任务");
+  const sourceText = taskLike.requirementDoc?.sourceText || taskLike.requirementDoc?.scope || taskLike.workflowTitle || taskLike.title || "QuantumFlow 自动任务";
+  const title = sanitizeCodeText(sourceText);
   const branch = sanitizeCodeText(taskLike.branch || "main");
   const spec = inferBusinessSpec(title);
   const libraryAdminLines = isVue3FrontendSpec(spec) ? vue3LibraryAdminArtifactLines(fileName, taskId, title, branch) : null;
   if (libraryAdminLines) return libraryAdminLines;
+  const libraryLines = spec.domain === "library" ? libraryFullstackArtifactLines(agentId, fileName, taskId, title, taskLike.requirementDoc) : null;
+  if (libraryLines) return libraryLines;
   if (taskLike.requirementDoc || ["oa", "crm", "order", "hr"].includes(spec.domain)) {
     return autonomousAgentArtifactLines(agentId, taskLike, fileName, taskId);
   }
@@ -6212,7 +6604,11 @@ function applySnapshot(snapshot) {
 }
 
 function runTask(index = currentTaskIndex + 1, options = {}) {
-  if (backendConnected && socket && !options.local) {
+  const hasLocalRunnableTask = tasks.some((task) =>
+    ["master_handoff", "reviewer_dispatch", "reviewer_package"].includes(task.source) &&
+    ["pending", "assigned", "active"].includes(task.status)
+  );
+  if (backendConnected && socket && !options.local && !hasLocalRunnableTask) {
     socket.send(JSON.stringify({ command: "dispatch_next" }));
     return;
   }
@@ -6234,6 +6630,11 @@ function runTask(index = currentTaskIndex + 1, options = {}) {
   }
   const owner = agentById(task.owner);
   if (!owner) return;
+  if (task.reviewerIntake) {
+    selectedReviewerIntakeKey = String(task.localWorkflowId || task.id);
+    dispatchReviewerTask(selectedReviewerIntakeKey);
+    return;
+  }
   if (task.status === "assigned" && !options.local) {
     startWorkerTaskFromReviewer(task);
     return;
@@ -6442,6 +6843,7 @@ function collaborativeProjectPlan(task) {
       ]
     : [
     { agentId: "frontend", repoId: "project", fileName: "app/static/app.js" },
+    { agentId: "frontend", repoId: "project", fileName: "app/static/styles.css" },
     { agentId: "backend", repoId: "project", fileName: "app/main.py" },
     { agentId: "tester", repoId: "project", fileName: "tests/test_smoke.py" },
     { agentId: "reviewer", repoId: "project", fileName: "docs/review-checklist.md" },
@@ -6505,8 +6907,16 @@ function writeCollaborativeProjectCode(task) {
 function runCompatibilityGate(task, plan) {
   const byFile = Object.fromEntries(plan.map((item) => [item.fileName, item]));
   const joined = Object.fromEntries(plan.map((item) => [item.fileName, item.lines.join("\n")]));
-  const spec = inferBusinessSpec(task.title || "");
-  const checks = isVue3FrontendSpec(spec)
+  const sourceText = task.requirementDoc?.sourceText || task.requirementDoc?.scope || task.workflowTitle || task.title || "";
+  const spec = inferBusinessSpec(sourceText);
+  const checks = spec.domain === "library" && !isVue3FrontendSpec(spec)
+    ? [
+        ["app/main.py", /\/api\/books[\s\S]*\/api\/books\/stats[\s\S]*semantic-search/],
+        ["app/static/app.js", /library-admin-app[\s\S]*semanticSearch[\s\S]*\/api\/books/],
+        ["tests/test_smoke.py", /test_library_health_and_catalog[\s\S]*semantic_search_contract/],
+        ["docs/review-checklist.md", /图书馆领域 API|semantic-search|语义检索/],
+      ]
+    : isVue3FrontendSpec(spec)
     ? [
         ["package.json", /"scripts"\s*:\s*\{[\s\S]*"test"/],
         ["src/main.js", /createApp|mount/],
@@ -6521,6 +6931,20 @@ function runCompatibilityGate(task, plan) {
         ["docs/review-checklist.md", /跨语言|兼容|接口契约|编码/],
       ];
   const failed = checks.find(([fileName, pattern]) => !byFile[fileName] || !pattern.test(joined[fileName] || ""));
+  if (!failed && spec.domain === "library") {
+    const genericLeak = Object.entries(joined).find(([, text]) => /\/api\/tasks|待处理[\s\S]*进行中[\s\S]*已完成|业务事项/.test(text));
+    if (genericLeak) {
+      const reworkItem = byFile[genericLeak[0]] || plan.find((item) => item.agentId !== "tester") || plan[0];
+      const refund = Math.ceil((reworkItem?.lines.join("\n").length || 0) / 3.8);
+      if (reworkItem) agentTokenRefunds[reworkItem.agentId] = (agentTokenRefunds[reworkItem.agentId] || 0) + refund;
+      return {
+        ok: false,
+        reworkItem,
+        ownerName: reworkItem?.agent.name || "原负责 Agent",
+        summary: `需求理解门禁未通过：图书馆需求中混入通用任务模板 ${genericLeak[0]}。返还 ${formatTokenCount(refund)} token 后重构。`,
+      };
+    }
+  }
   if (!failed) {
     return { ok: true, summary: "兼容性门禁通过：功能、接口契约、运行脚本、编码格式和测试入口一致。" };
   }
@@ -6772,13 +7196,14 @@ function masterHandoffSnapshot(preferredOwner = "master") {
   };
 }
 
-function requestMasterTaskHandoff(title, preferredOwner = "master") {
+function requestMasterTaskHandoff(title, preferredOwner = "master", requirementReview = null) {
   const cleanTitle = title.trim();
   if (!cleanTitle) return;
   const snapshot = masterHandoffSnapshot(preferredOwner);
   pendingMasterHandoff = {
     id: `handoff-${Date.now().toString(36)}`,
     title: cleanTitle,
+    requirementReview,
     preferredOwner,
     targetOwner: "reviewer",
     targetOwners: snapshot.targetOwners,
@@ -6818,6 +7243,7 @@ function renderMasterHandoffDialog(snapshot = currentMasterHandoffSnapshot()) {
   const busyCount = snapshot.rows.length - availableCount;
   const selectedIds = new Set(snapshot.selectedOwners || snapshot.targetOwners);
   const selectedNames = (snapshot.selectedRows || snapshot.freeRows).map((item) => item.name).join("、") || "无";
+  const review = handoff.requirementReview;
   const commandPreview = canSubmit
     ? `任务交接：${handoff.title}；团队负责人接收后生成需求书/技术书，交给代码负责人按定向目标启动：${selectedNames}。`
     : `任务交接：${handoff.title}；${snapshot.reviewerBusy ? "代码审查者正在处理任务" : "定向执行 Agent 正忙"}，暂不接收。`;
@@ -6833,6 +7259,16 @@ function renderMasterHandoffDialog(snapshot = currentMasterHandoffSnapshot()) {
             <code>${escapeHtml(commandPreview)}</code>
             <button type="button" title="展开任务详情">展开</button>
           </div>
+          ${
+            review
+              ? `<section class="master-requirement-review">
+                  <strong>需求理解审查</strong>
+                  <span>置信度 ${escapeHtml(String(review.confidence))}% / ${escapeHtml(review.summary)}</span>
+                  <p>${escapeHtml(review.scope)}</p>
+                  <ul>${[...review.features, ...review.risks].map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+                </section>`
+              : ""
+          }
           <section class="master-load-grid">
             ${snapshot.rows
               .map(
@@ -6858,11 +7294,8 @@ function renderMasterHandoffDialog(snapshot = currentMasterHandoffSnapshot()) {
             <button class="selected" type="button" data-master-handoff-accept ${canSubmit ? "" : "disabled"}>
               <span>1.</span><strong>是，团队负责人接收并交给 ${escapeHtml(targetName)}</strong><b>↑↓</b>
             </button>
-            <button type="button" data-master-handoff-select-all ${availableCount ? "" : "disabled"}>
-              <span>2.</span><strong>全选可用 Agent（${availableCount} 个可用 / ${busyCount} 个忙碌）</strong>
-            </button>
             <button type="button" data-master-handoff-close>
-              <span>3.</span><strong>否，暂不接收这条任务</strong>
+              <span>2.</span><strong>否，暂不接收这条任务</strong>
             </button>
           </div>
         </main>
@@ -6935,11 +7368,50 @@ function toggleMasterHandoffWorker(workerId) {
   renderMasterHandoffDialog();
 }
 
-function selectAllMasterHandoffWorkers() {
-  if (!pendingMasterHandoff) return;
-  const snapshot = masterHandoffSnapshot(pendingMasterHandoff.preferredOwner || "master");
-  pendingMasterHandoff.targetOwners = snapshot.freeRows.map((item) => item.id);
-  renderMasterHandoffDialog();
+function openRequirementDrawer() {
+  els.requirementDrawer?.classList.add("active");
+  els.requirementDrawer?.setAttribute("aria-hidden", "false");
+  window.setTimeout(() => els.requirementReaderInput?.focus(), 0);
+}
+
+function closeRequirementDrawer() {
+  els.requirementDrawer?.classList.remove("active");
+  els.requirementDrawer?.setAttribute("aria-hidden", "true");
+}
+
+async function readRequirementFile(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  if (els.requirementReaderState) els.requirementReaderState.textContent = "读取中";
+  openRequirementDrawer();
+  try {
+    const text = await file.text();
+    if (els.requirementReaderInput) els.requirementReaderInput.value = text;
+    const review = analyzeRequirementText(text);
+    renderRequirementReview(review);
+    if (els.requirementReaderState) els.requirementReaderState.textContent = "已读取";
+  } catch (error) {
+    if (els.requirementReaderState) els.requirementReaderState.textContent = "读取失败";
+    if (els.requirementReaderOutput) els.requirementReaderOutput.textContent = `读取失败：${error.message || "unknown"}`;
+  }
+}
+
+function submitRequirementReader() {
+  const text = els.requirementReaderInput?.value.trim() || "";
+  if (!text) {
+    if (els.requirementReaderState) els.requirementReaderState.textContent = "缺少文本";
+    if (els.requirementReaderOutput) els.requirementReaderOutput.textContent = "请先粘贴或读取需求文本。";
+    return;
+  }
+  const review = analyzeRequirementText(text);
+  renderRequirementReview(review);
+  if (els.requirementReaderState) els.requirementReaderState.textContent = "已审查";
+  if (els.taskInput) els.taskInput.value = review.title;
+  if (els.ownerSelect) els.ownerSelect.value = "reviewer";
+  addLog(`需求读取插件已完成理解审查：${review.title}`, "Master");
+  pushComment("需求读取插件", `已提取需求并准备技术书：${review.summary}`, "suggestion", "requirements/reader");
+  closeRequirementDrawer();
+  requestMasterTaskHandoff(review.title, "reviewer", review);
 }
 
 async function acceptMasterHandoff() {
@@ -6974,6 +7446,8 @@ async function acceptMasterHandoff() {
   pushComment("团队负责人", `已生成需求书/技术书 ${requirementDoc.id}，交给代码负责人；定向 Agent：${ownerNames}`);
   closeMasterHandoffDialog();
   renderAll();
+  selectedReviewerIntakeKey = String(tasks[tasks.length - 1]?.localWorkflowId || "");
+  window.setTimeout(() => openReviewerDispatchPanel(agentById("reviewer")), 80);
 }
 
 function startAuto() {
@@ -7144,9 +7618,16 @@ function renderAll() {
   renderCommunity();
 }
 
-els.nextBtn.addEventListener("click", () => runTask());
+els.nextBtn?.addEventListener("click", () => runTask());
 els.autoBtn.addEventListener("click", startAuto);
 els.resetBtn.addEventListener("click", resetAll);
+els.requirementOpenBtn?.addEventListener("click", openRequirementDrawer);
+els.requirementCloseBtn?.addEventListener("click", closeRequirementDrawer);
+els.requirementDrawer?.addEventListener("click", (event) => {
+  if (event.target === els.requirementDrawer) closeRequirementDrawer();
+});
+els.requirementReaderFile?.addEventListener("change", readRequirementFile);
+els.requirementReviewBtn?.addEventListener("click", submitRequirementReader);
 els.pauseBtn.addEventListener("click", () => {
   paused = !paused;
   els.pauseBtn.textContent = paused ? "▶" : "⏸";
@@ -7271,6 +7752,24 @@ els.roomDocSaveBtn?.addEventListener("click", saveRoomDoc);
 els.roomBackBtn?.addEventListener("click", () => switchView("developerAdmin"));
 els.roomInviteCopyBtn?.addEventListener("click", () => copyInviteCode(els.roomInviteCopyBtn));
 document.addEventListener("click", (event) => {
+  const reviewerQuickRun = event.target.closest?.("[data-reviewer-quick-run]");
+  if (reviewerQuickRun) {
+    event.preventDefault();
+    event.stopPropagation();
+    dispatchReviewerTask(reviewerQuickRun.dataset.reviewerQuickRun);
+    return;
+  }
+  const reviewerChoice = event.target.closest?.("[data-reviewer-task]");
+  if (reviewerChoice) {
+    event.preventDefault();
+    event.stopPropagation();
+    const task = findWorkflowTask(reviewerChoice.dataset.reviewerTask);
+    if (task?.reviewerIntake) {
+      selectedReviewerIntakeKey = String(task.localWorkflowId || task.id);
+      openReviewerDispatchPanel(agentById("reviewer"));
+    }
+    return;
+  }
   const handoffAccept = event.target.closest?.("[data-master-handoff-accept]");
   if (handoffAccept) {
     acceptMasterHandoff();
@@ -7282,11 +7781,6 @@ document.addEventListener("click", (event) => {
     toggleMasterHandoffWorker(handoffWorker.dataset.masterHandoffWorker);
     return;
   }
-  const handoffSelectAll = event.target.closest?.("[data-master-handoff-select-all]");
-  if (handoffSelectAll) {
-    selectAllMasterHandoffWorkers();
-    return;
-  }
   const handoffClose = event.target.closest?.("[data-master-handoff-close]");
   if (handoffClose) {
     closeMasterHandoffDialog();
@@ -7294,14 +7788,6 @@ document.addEventListener("click", (event) => {
   }
   const openRoomButton = event.target.closest?.("[data-open-room]");
   if (openRoomButton) openProjectRoom(openRoomButton.dataset.openRoom);
-  const reviewerChoice = event.target.closest?.("[data-reviewer-task]");
-  if (reviewerChoice) {
-    const task = findWorkflowTask(reviewerChoice.dataset.reviewerTask);
-    if (task?.reviewerIntake) {
-      selectedReviewerIntakeKey = String(task.localWorkflowId || task.id);
-      openReviewerDispatchPanel(agentById("reviewer"));
-    }
-  }
   const reviewerDispatchSubmit = event.target.closest?.("[data-reviewer-dispatch-submit]");
   if (reviewerDispatchSubmit) {
     dispatchReviewerTask(reviewerDispatchSubmit.dataset.reviewerDispatchSubmit);
@@ -8513,7 +8999,7 @@ function stopAdminChatPreview() {
   adminChatTimer = null;
 }
 
-function switchView(view) {
+function switchView(view, options = {}) {
   if (!currentUser && !isAuthRoute()) {
     enforceLoginGate();
     return;
@@ -8576,7 +9062,7 @@ function switchView(view) {
   if (platformMode) {
     if (location.protocol !== "file:") history.replaceState(null, "", "/platform");
     stopAdminChatPreview();
-    switchOpenWorldPanel("repositoriesPanel");
+    switchOpenWorldPanel(options.worldPanel || "repositoriesPanel");
     renderCommunity();
     loadPatchHistory();
     loadIssues();
@@ -9193,6 +9679,33 @@ function setupRoomAutoFit() {
   }
 }
 
+async function syncBrowserProjectStateToDatabase() {
+  if (location.protocol === "file:") return;
+  try {
+    const items = [];
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key || (!key.startsWith("qf") && !key.startsWith("quantumflow") && !key.includes("QuantumFlow"))) continue;
+      const raw = localStorage.getItem(key);
+      let value = raw;
+      try {
+        value = JSON.parse(raw);
+      } catch {
+        value = raw;
+      }
+      items.push({ key, value });
+    }
+    if (!items.length) return;
+    await fetch("/api/project-data/browser-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: "quantumflow-mvp/localStorage", items }),
+    });
+  } catch {
+    // Browser state sync is best-effort; the app should never fail because of it.
+  }
+}
+
 window.setInterval(() => {
   els.clock.textContent = new Date().toLocaleTimeString("zh-CN", { hour12: false });
 }, 1000);
@@ -9249,6 +9762,7 @@ if (location.pathname.includes("register")) showAuthView("register", false);
 else if (location.pathname.includes("forgot-password")) showAuthView("forgot", false);
 else if (location.pathname.includes("login")) showAuthView("login", false);
 connectBackend();
+syncBrowserProjectStateToDatabase();
 watchAppVersion();
 window.setInterval(watchAppVersion, 2500);
 

@@ -75,6 +75,10 @@ def post_json(url: str, body: Dict[str, Any]) -> Dict[str, Any]:
             }
     except urllib.error.URLError as exc:
         return {"ok": False, "mode": "http", "reason": str(exc)}
+    except (TimeoutError, OSError) as exc:
+        # socket.timeout (Py3.10+) is TimeoutError, not URLError; catch all
+        # transport-level failures so a webhook never crashes the caller.
+        return {"ok": False, "mode": "http", "reason": f"connection error: {exc}"}
 
 
 def parse_json_response(text: str) -> Any:

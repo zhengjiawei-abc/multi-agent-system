@@ -1,84 +1,121 @@
-Multi-Agent 多智能体系统协作系统设计文档（含 API 规范）
+# QuantumFlow 多智能体协作系统设计文档（v2，OpenClaw 对齐版）
 
-LLM 核心基础知识库
+> 本文档描述 QuantumFlow 当前**真实运行**的架构。早期版本曾规划 RabbitMQ + Redis +
+> 四智能体加权投票，但在单机桌面形态下这些组件是冗余的，已被移除。本版借鉴
+> [OpenClaw 多智能体架构](https://markaicode.com/architecture/openclaw-multi-agent-architecture/)
+> 的核心思想——**无状态编排器 + 专精智能体 + 异步队列 + 弹性容错**，但按本项目的实际规模做了裁剪。
 
-一、大模型运行本质（How LLM Works）
+## 0. 为什么做这次优化
 
-大模型（LLM）的本质是基于统计概率的文本生成引擎。
+旧设计与代码严重脱节，且存在明显冗余：
 
-LLM：大语言模型回答问题时，会通过模型内部运算预测出现概率最高的词，然后逐词预测下一个词，直到回答完毕并输出结束标识符。其核心流程为：逐词预测 + 概率采样 + 结束标识符。
+| 旧设计文档声称 | 代码实际情况 | 处置 |
+| --- | --- | --- |
+| RabbitMQ 消息队列保证并发 | 进程内 `asyncio.Lock` + `drain_pending_tasks` | 删除 RabbitMQ，承认 asyncio 队列 |
+| Redis 共享记忆 | SQLite（`storage.py`） | 删除 Redis，承认 SQLite |
+| 四智能体加权投票选总司令 | 关键词静态打分，无投票 | 删除投票机制，改为路由打分 |
+| 智能体用 codex/gpt5.5 生成代码 | `asyncio.sleep` + 模板拼接，从不调用 LLM | **接入真实 LLM**（本版核心改动） |
+| 误差闭环纠错 | 未实现 | 用校验失败回退 + 断路器替代 |
 
-Token：大语言模型中最基本的单元。通过分词器把输入文本切分成一块块词语，每个词语对应一个 Token 及其 ID。模型内部通过 Transformer 架构预测概率最高的下一个 Token，并循环此过程直到输出结束标识符。这就是大模型的运行流程和底层逻辑。
+**核心原则**：文档只描述真实存在的东西；冗余的中间件不写进设计；规模不需要的机制（如投票）不强加。
 
-Context：上下文，大模型每次处理任务时接收到的信息总和。
+## 1. 系统架构
 
-Context Window（上下文窗口）：模型能处理的最大 Token 容量上限。
+QuantumFlow 是单进程的多智能体协作开发系统，分两个平面：
 
-二、Transformer 架构
+- **控制平面（Control Plane）**：负责人（master）拆解需求、路由任务、整合交付。无状态——所有状态落在 SQLite，进程重启可恢复。
+- **执行平面（Execution Plane）**：frontend / backend / tester / reviewer 四个专精智能体，共享同一基础模型（默认 `gpt-5.5`），通过角色 Prompt 与温度区分职责。
 
-大模型内部通过Transformer架构处理输入序列。它是目前主流 LLM 的基石，实现了并行计算，取代了以往的顺序处理方式。
+```
+用户/飞书/Issue/项目房间
+        │
+        ▼
+   入站归一化 (connectors.py)  ──►  任务队列 (asyncio, run_lock)
+        │
+        ▼
+   编排器 (server.execute_collaborative_dev_task)
+        │  路由打分 (score_agent_candidates + orchestrator.route_score)
+        ├──► frontend ┐
+        ├──► backend  │  并行执行 (asyncio.gather)
+        ├──► tester   │  每个 agent → orchestrator.generate_agent_code
+        └──► reviewer ┘        │ 重试/退避/断路器/幂等/模板兜底
+                               ▼
+                         LLM.invoke_agent → 真实模型
+                               │
+                               ▼
+   校验门禁 → 打包交付 (build_project_delivery) → SQLite + 可下载 zip
+```
 
-三、Attention 机制（自注意力机制）
+## 2. 弹性执行层（本版核心，对齐 OpenClaw）
 
-Attention 机制让当前的 Token 找到相关的其他 Token 进行加权求和，再结合 Context，通过 Transformer 架构进行矩阵运算来预测下一轮 Token。其核心是给不同 Token 分配不同的“权重”。
+所有智能体的真实工作都经过 `orchestrator.generate_agent_code`，它在 `LLM.invoke_agent`
+外面包了一层 OpenClaw 风格的容错：
 
-解决的问题：让模型能够有效联系上下文。例如在“苹果很好吃，因为它很新鲜”这句话中，Attention 会让模型知道“它”指代的是“苹果”。
+- **重试 + 指数退避**：失败按 `1s → 4s → 15s` 退避重试（`BACKOFF_SCHEDULE`）。
+- **快速失败**：缺少 API Key、缺依赖、401/认证类错误不重试，直接兜底（`_is_non_transient`）。
+- **断路器**：单个 agent 在 600s 窗口内失败 5 次即熔断，冷却 120s 后半开探测（`CircuitBreaker`）。
+- **幂等键**：`correlation_id = sha1(task_id|agent_id|step)`，重复调用直接返回缓存，避免重复生成。
+- **模板兜底**：LLM 不可用或输出未通过校验时，回退到确定性模板（`generated_code_text`），保证流程必定完成。
 
-多智能体（Multi-Agent）项目设计与流程图
+产物来源在审计日志中标注为 `llm` / `cache` / `fallback`，前端可见。
 
-1. 系统架构设计
+## 3. 任务路由（替代旧投票机制）
 
-核心目标：通过多智能体协作实现“降本增效”，人类负责提供创造性想法，AI 团队负责逻辑规划与工程落地。
+旧的"四智能体加权投票选总司令"对单机单领域任务是冗余的（OpenClaw 明确指出：
+单领域任务不要上多智能体，单体延迟更低）。改为**两段式路由打分**：
 
-系统采用“总司令 - 执行者”的层级结构，结合中间件保障并发安全与记忆连续性。
+1. **关键词亲和度**（`score_agent_candidates`）：按角色关键词命中数 × 角色权重得到基础分。
+2. **健康度调整**（`orchestrator.route_score`）：
 
-决策层：
-Manager（Claude Code）：负责全局任务拆解、逻辑仲裁及投票发起。
-投票机制：针对复杂决策，由四个 Agent 共同投票产生最终执行方案。
+   ```
+   effective = base × (0.5 + 0.5 × 成功率) × 1/(1+在途负载) × 断路器惩罚
+   ```
 
-中间件层：
-RabbitMQ（消息队列）：所有待处理任务进入队列排队，解决 Agent 并发竞争问题，保证消息同步处理。
-Redis（共享记忆）：缓存各 Agent 的 Token 状态、变量名及文件路径，实现长短期记忆持久化。
+   即"按负载与历史成功率选最优 agent"——这正是 OpenClaw 的路由原则，但不需要多模型投票。
 
-执行层：
-Codex（后端） / Gemini（前端）：并行生成代码 Token。
-OpenCode（环境）：负责 WSL 终端交互、代码写入及测试运行。
+实时健康度通过 `GET /api/agents/health` 暴露：成功/失败次数、在途负载、成功率、断路器状态。
 
-2. 完整业务流程图（End-to-End Workflow）
+## 4. 中间件层（务实裁剪）
 
+| 能力 | OpenClaw（多 Pod 横向扩展） | QuantumFlow（单机） |
+| --- | --- | --- |
+| 任务队列 | Redis Streams + 消费组 | `asyncio` + `run_lock`（`drain_pending_tasks`） |
+| 短期记忆/上下文 | Redis + Lua 原子写 | 进程内 runtime + 幂等缓存 |
+| 持久化/审计 | PostgreSQL | SQLite（`storage.py`：task_log / code_artifact / adoption / delivery） |
+| 服务发现 | etcd Skill Registry | 静态 agent 表（`default_runtime`） |
 
-3. API 接口文档（各 Agent 的调用规范）
+**结论**：在单进程桌面形态下，asyncio + SQLite 就是合适的规模。引入 RabbitMQ/Redis/etcd
+只会增加部署负担而不带来收益，故不纳入设计。若未来需要多机横向扩展，可按上表右→左升级。
 
-设计原则：所有 Agent 必须遵循统一的请求/响应格式，确保在 RabbitMQ 消息队列中能够被正确解析与路由。指令集保持极简。
+## 5. API 接口（对内 HTTP，非旧版 /ask /pend /exec /vote）
 
-指令 (命令)	发起方	目标接收方 (Target)	功能描述	输入参数
-/ask	Claude	Codex/Gemini	委派代码生成任务（后端或前端）	{task_id, prompt, context_ref}
-/pend	Claude	Codex/Gemini	异步回收执行结果（等待 Token 生成完毕）	{task_id}
-/exec	Claude	OpenCode	要求在本地执行命令或写入文件	{command, file_path, content}
-/vote	Claude	所有代理	发起集体投票，选出当前阶段的“总司令”	{topic, options}
+旧版四指令（`/ask`、`/pend`、`/exec`、`/vote`）是为 RabbitMQ 消息总线设计的，
+实际系统是 FastAPI HTTP 接口。真实关键接口：
 
-4. 多智能体投票与仲裁机制（Voting & Arbitration）
+| 方法 | 路径 | 功能 |
+| --- | --- | --- |
+| POST | `/api/tasks` | 创建任务并自动入队调度 |
+| POST | `/api/dispatch-next` | 手动触发一次队列调度 |
+| GET | `/api/snapshot` | 智能体/任务/事件/队列快照 |
+| GET | `/api/agents/health` | 编排器健康度（成功率/负载/断路器） |
+| POST | `/api/agents/arbitrate` | 任务路由打分与推荐 agent |
+| GET | `/api/code-artifacts` | 各 agent 产出的代码产物 |
+| GET | `/api/project-deliveries` | 可下载的项目交付包 |
 
-设计背景：在处理复杂业务逻辑时，单一 Agent 可能存在逻辑盲点。通过投票机制从多个维度评估方案鲁棒性。
+完整接口以 `server.py` 中的 FastAPI 路由为准。
 
-投票工作流：
-1.Manager 提出 2-3 个备选方案。
-2.各 Agent 根据擅长领域拥有不同权重（Codex 1.5x、Gemini 1.5x、OpenCode 1.2x）。
-3.进行匿名评价并通过 RabbitMQ 传递。
-4.系统汇总权重得分，选出最高分方案作为“执行总司令”。
+## 6. 质量门禁与闭环
 
-人类仲裁：投票平局时，桌面端软件会邀请用户进行最终裁决。
-一票否决权：Manager 可对存在明显安全漏洞的方案执行否决。
+代替旧的"误差 e = 满分答案 − 当前输出"抽象描述，真实闭环是：
 
-5. 测试与质量保障方案（QA 与 Error Correction）
+1. **生成**：agent 经弹性层产出代码（LLM 优先，模板兜底）。
+2. **校验**：`validate_generated_code` 做语法/兼容性门禁；LLM 产物未过校验则回退模板再校验。
+3. **集成测试**：交付包通过 `POST /api/project-deliveries/{id}/test`（前端跑 spec、后端跑 smoke）。
+4. **修复回流**：测试失败时 `POST /api/project-deliveries/{id}/fix` 重新入队给对应 agent。
+5. **审计**：每步写入 `task_log`，产物来源（llm/cache/fallback）与校验结论全程可追溯。
 
-基于误差反馈的闭环纠错逻辑：
+## 7. 后续可演进项
 
-误差定义：e = 满分答案 - 当前输出
-反馈循环：OpenCode 运行测试（如npm test），捕获报错信息并反馈给 Manager。
-指令微调：Manager 根据误差调整 Prompt，重新生成更有针对性的指令，直到测试全部通过。
-
-
-系统稳定性保障：
-RabbitMQ 实现指令排队，避免“插队”。
-Redis 记录文件状态，避免代码被互相覆盖。
+- 路由历史成功率持久化到 SQLite（当前在内存，重启清零）。
+- 任务级 DAG 拆解：让 master 用 LLM 把复杂需求拆成子任务图，而非固定四角色并行。
+- 多 Provider 模型回退（如 429 时降级到本地模型），`Model.py` 已支持按 agent 配置 provider。

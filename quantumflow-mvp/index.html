@@ -125,6 +125,14 @@
             </select>
             <button type="submit">交接</button>
           </form>
+          <section class="requirement-reader" id="requirementReader">
+            <button class="requirement-reader-card" id="requirementOpenBtn" type="button">
+              <span>需求读取</span>
+              <strong id="requirementReaderState">等待需求</strong>
+              <em id="requirementReaderOutput">打开需求工作台</em>
+            </button>
+            <input id="requirementReaderFile" type="file" accept=".txt,.md,.json,.csv" />
+          </section>
           <div class="task-list" id="taskList"></div>
         </section>
       </aside>
@@ -143,7 +151,6 @@
             <button class="tab-button locked" data-view="developerAdmin">开发者管理中心</button>
             <button class="user-chip" id="authUserBtn" type="button">登录 / 注册</button>
             <button class="icon-button" id="pauseBtn" title="暂停/继续">⏸</button>
-            <button class="primary-button" id="nextBtn">分发下一步</button>
           </div>
         </header>
 
@@ -1142,6 +1149,28 @@
         </section>
       </main>
     </div>
+
+    <section class="requirement-drawer" id="requirementDrawer" aria-hidden="true">
+      <div class="requirement-drawer-panel" role="dialog" aria-modal="true" aria-label="需求读取工作台">
+        <header>
+          <div><span>Requirement Reader</span><h3>先读懂需求，再启动 Agent</h3></div>
+          <button type="button" id="requirementCloseBtn" title="关闭">×</button>
+        </header>
+        <main>
+          <section class="requirement-editor">
+            <div class="requirement-toolbar">
+              <label for="requirementReaderFile">导入文本</label>
+              <button type="button" id="requirementReviewBtn">理解并执行</button>
+            </div>
+            <textarea id="requirementReaderInput" placeholder="粘贴 PRD、客户原话、页面描述、验收标准、限制条件。越具体，Agent 越不容易写成通用模板。"></textarea>
+          </section>
+          <aside class="requirement-review-panel">
+            <strong>理解审查</strong>
+            <div id="requirementReviewOutput">等待需求文本。</div>
+          </aside>
+        </main>
+      </div>
+    </section>
 
     <script src="/app.js?v=20260605-runtime-readable-preview"></script>
   </body>

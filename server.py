@@ -2,6 +2,7 @@
 
 import ast
 import asyncio
+import base64
 import hashlib
 import hmac
 import json
@@ -35,7 +36,8 @@ from connectors import (
     normalize_wecom_message,
     parse_bot_command,
 )
-from patch_service import apply_candidate, build_candidate, read_history, validate_candidate
+from orchestrator import breaker as agent_breaker, generate_agent_code, route_score
+from patch_service import apply_candidate, build_candidate, read_history, validate_candidate, validate_code_text
 from storage import SnapshotStore
 
 
@@ -83,8 +85,53 @@ INTERNAL_REPO_TEXT_EXTENSIONS = {
     ".yml",
 }
 INTERNAL_REPO_TEXT_NAMES = {"Dockerfile", "Makefile", "README", "LICENSE", ".gitignore"}
+PROJECT_DATA_SYNC_DIRS = [
+    ROOT / "assets",
+    ROOT / "docs",
+    ROOT / "generated_repos",
+    ROOT / "my_db",
+    ROOT / "patches",
+    ROOT / "quantumflow-mvp",
+]
+PROJECT_DATA_SYNC_FILES = [
+    ROOT / "connector.config.json",
+    ROOT / "desktop.config.json",
+    ROOT / "codex_project_index.json",
+    ROOT / "README.md",
+    ROOT / "requirements.txt",
+    ROOT / "server.py",
+    ROOT / "storage.py",
+    ROOT / "Agent.py",
+    ROOT / "LLM.py",
+    ROOT / "RAG.py",
+    ROOT / "connectors.py",
+    ROOT / "connector_sender.py",
+]
+PROJECT_DATA_EXCLUDED_DIRS = {
+    ".git",
+    ".idea",
+    ".venv",
+    "__pycache__",
+    ".pytest_cache",
+    "node_modules",
+    "release",
+    "tmp_git_source_for_sync.git",
+}
+PROJECT_DATA_TEXT_EXTENSIONS = INTERNAL_REPO_TEXT_EXTENSIONS | {".log", ".jsonl"}
+PROJECT_DATA_INLINE_TEXT_LIMIT = 1_000_000
+PROJECT_DATA_INLINE_BINARY_LIMIT = 512_000
 
-app = FastAPI(title="QuantumFlow Runtime", version="0.1.0")
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    seed_codex_foundation_memory()
+    schedule_auto_dispatch("startup")
+    yield
+
+
+app = FastAPI(title="QuantumFlow Runtime", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -357,12 +404,6 @@ async def auth_update_profile(
             raise HTTPException(status_code=409, detail=f"{label}已被其他账号绑定。")
     updated = store.update_user_profile(int(user["id"]), username, email, phone)
     return {"ok": True, "user": public_user(updated or user)}
-
-
-@app.on_event("startup")
-async def start_auto_dispatch() -> None:
-    seed_codex_foundation_memory()
-    schedule_auto_dispatch("startup")
 
 
 def seed_codex_foundation_memory() -> None:
@@ -639,6 +680,12 @@ def project_python_exe() -> Path:
 @app.get("/api/snapshot")
 async def snapshot() -> Dict[str, Any]:
     return runtime_snapshot()
+
+
+@app.get("/api/agents/health")
+async def agents_health() -> Dict[str, Any]:
+    """Live orchestrator health: per-agent success rate, load, breaker state."""
+    return {"ok": True, "agents": agent_breaker.snapshot()}
 
 
 @app.get("/api/history")
@@ -1296,6 +1343,47 @@ async def clear_project_deliveries() -> Dict[str, Any]:
     return {"ok": True, "cleared": cleared, "snapshot": data}
 
 
+@app.post("/api/project-data/sync")
+async def sync_project_data() -> Dict[str, Any]:
+    result = await asyncio.to_thread(sync_project_data_to_database)
+    store.record_task_log(
+        None,
+        "master",
+        "Project Data Store",
+        "project_data_sync",
+        "workspace files + configs",
+        json.dumps(result, ensure_ascii=False)[:1000],
+        status="ok" if result.get("ok") else "partial",
+    )
+    return result
+
+
+@app.get("/api/project-data/summary")
+async def project_data_summary() -> Dict[str, Any]:
+    return {"ok": True, "summary": store.project_data_summary()}
+
+
+@app.post("/api/project-data/browser-state")
+async def store_browser_project_state(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    items = payload.get("items") if isinstance(payload.get("items"), list) else []
+    saved = 0
+    for item in items[:200]:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "").strip()[:240]
+        if not key:
+            continue
+        value = item.get("value")
+        store.upsert_project_data_item(
+            "browser_local_storage",
+            key,
+            value=value,
+            source=str(payload.get("source") or "quantumflow-mvp"),
+        )
+        saved += 1
+    return {"ok": True, "saved": saved, "summary": store.project_data_summary()}
+
+
 @app.get("/api/project-deliveries/{delivery_id}/download")
 async def download_project_delivery(delivery_id: int) -> FileResponse:
     delivery = store.get_project_delivery(delivery_id)
@@ -1744,7 +1832,11 @@ async def clear_tasks() -> Dict[str, Any]:
 @app.post("/api/patch/preview")
 async def patch_preview(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     try:
-        candidate = build_candidate(str(payload.get("target_key", "")), str(payload.get("suggestion", "")))
+        candidate = build_candidate(
+            str(payload.get("target_key", "")),
+            str(payload.get("suggestion", "")),
+            str(payload.get("base_hash") or "") or None,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     validation = validate_candidate(candidate)
@@ -1752,6 +1844,8 @@ async def patch_preview(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         "target_key": candidate.target_key,
         "target": str(candidate.target_path),
         "preview_lines": candidate.preview_lines,
+        "base_hash": candidate.base_hash,
+        "language": candidate.language,
         "validation": validation,
     }
 
@@ -1759,7 +1853,11 @@ async def patch_preview(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
 @app.post("/api/patch/candidates")
 async def patch_candidate_create(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     try:
-        candidate = build_candidate(str(payload.get("target_key", "")), str(payload.get("suggestion", "")))
+        candidate = build_candidate(
+            str(payload.get("target_key", "")),
+            str(payload.get("suggestion", "")),
+            str(payload.get("base_hash") or "") or None,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     validation = validate_candidate(candidate)
@@ -1770,6 +1868,8 @@ async def patch_candidate_create(payload: Dict[str, Any] = Body(...)) -> Dict[st
         "target": str(candidate.target_path),
         "suggestion": candidate.suggestion,
         "preview_lines": candidate.preview_lines,
+        "base_hash": candidate.base_hash,
+        "language": candidate.language,
         "validation": validation,
         "status": "ready" if validation["ok"] else "rejected",
         "task_id": str(payload.get("task_id") or "review-auto"),
@@ -1795,7 +1895,7 @@ async def patch_candidate_apply(candidate_id: str) -> Dict[str, Any]:
     if record["status"] != "ready":
         raise HTTPException(status_code=400, detail=f"Candidate is not ready: {record['status']}")
     try:
-        candidate = build_candidate(record["target_key"], record["suggestion"])
+        candidate = build_candidate(record["target_key"], record["suggestion"], record.get("base_hash"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     result = apply_candidate(candidate)
@@ -1826,7 +1926,11 @@ async def patch_candidate_apply(candidate_id: str) -> Dict[str, Any]:
 @app.post("/api/patch/apply")
 async def patch_apply(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     try:
-        candidate = build_candidate(str(payload.get("target_key", "")), str(payload.get("suggestion", "")))
+        candidate = build_candidate(
+            str(payload.get("target_key", "")),
+            str(payload.get("suggestion", "")),
+            str(payload.get("base_hash") or "") or None,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     result = apply_candidate(candidate)
@@ -2368,6 +2472,123 @@ def summarize_project_database() -> str:
         return f"QuantumFlow SQLite schema scan failed: {error}"
 
 
+def project_data_file_kind(path: Path) -> str:
+    parts = path.relative_to(ROOT).parts if path.is_relative_to(ROOT) else path.parts
+    if path in PROJECT_DATA_SYNC_FILES:
+        return "config" if path.suffix.lower() == ".json" else "source"
+    if parts and parts[0] == "generated_repos":
+        return "generated_repo"
+    if parts and parts[0] == "my_db":
+        return "rag_store"
+    if parts and parts[0] == "quantumflow-mvp":
+        return "frontend"
+    if parts and parts[0] == "docs":
+        return "document"
+    if parts and parts[0] == "assets":
+        return "asset"
+    if parts and parts[0] == "patches":
+        return "patch"
+    return "project"
+
+
+def should_sync_project_file(path: Path) -> bool:
+    try:
+        relative_parts = path.relative_to(ROOT).parts
+    except ValueError:
+        return False
+    if any(part in PROJECT_DATA_EXCLUDED_DIRS for part in relative_parts):
+        return False
+    if path.name.endswith((".pyc", ".pyo")):
+        return False
+    return path.is_file()
+
+
+def iter_project_data_files() -> List[Path]:
+    selected: Dict[str, Path] = {}
+    for path in PROJECT_DATA_SYNC_FILES:
+        if should_sync_project_file(path):
+            selected[str(path.resolve())] = path
+    for root in PROJECT_DATA_SYNC_DIRS:
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if should_sync_project_file(path):
+                selected[str(path.resolve())] = path
+    return sorted(selected.values(), key=lambda item: str(item.relative_to(ROOT)).lower())
+
+
+def sync_project_file_to_database(path: Path) -> Dict[str, Any]:
+    relative = str(path.relative_to(ROOT)).replace("\\", "/")
+    size = path.stat().st_size
+    suffix = path.suffix.lower()
+    is_text = suffix in PROJECT_DATA_TEXT_EXTENSIONS or path.name in INTERNAL_REPO_TEXT_NAMES
+    content_text = None
+    content_base64 = None
+    stored_mode = "metadata"
+    if size > max(PROJECT_DATA_INLINE_TEXT_LIMIT, PROJECT_DATA_INLINE_BINARY_LIMIT):
+        digest = hash_project_file(path)
+    else:
+        raw = path.read_bytes()
+        digest = hashlib.sha256(raw).hexdigest()
+    if is_text and size <= PROJECT_DATA_INLINE_TEXT_LIMIT:
+        raw = path.read_bytes() if "raw" not in locals() else raw
+        content_text = raw.decode("utf-8", errors="replace")
+        stored_mode = "text"
+    elif not is_text and size <= PROJECT_DATA_INLINE_BINARY_LIMIT:
+        raw = path.read_bytes() if "raw" not in locals() else raw
+        content_base64 = base64.b64encode(raw).decode("ascii")
+        stored_mode = "base64"
+    return store.upsert_project_file_snapshot(
+        path=relative,
+        kind=project_data_file_kind(path),
+        size_bytes=size,
+        sha256=digest,
+        content_text=content_text,
+        content_base64=content_base64,
+        stored_mode=stored_mode,
+    )
+
+
+def hash_project_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def sync_project_data_to_database() -> Dict[str, Any]:
+    synced = 0
+    failed: List[Dict[str, str]] = []
+    for path in iter_project_data_files():
+        try:
+            sync_project_file_to_database(path)
+            synced += 1
+        except Exception as error:
+            failed.append({"path": str(path.relative_to(ROOT)).replace("\\", "/"), "error": str(error)})
+
+    config_files = {
+        "connector.config.json": ROOT / "connector.config.json",
+        "desktop.config.json": ROOT / "desktop.config.json",
+        "codex_project_index.json": ROOT / "codex_project_index.json",
+    }
+    for key, path in config_files.items():
+        if not path.exists():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+            try:
+                value = json.loads(text)
+                store.upsert_project_data_item("file_config", key, value=value, source=str(path.relative_to(ROOT)))
+            except json.JSONDecodeError:
+                store.upsert_project_data_item("file_config", key, value_text=text, source=str(path.relative_to(ROOT)))
+        except Exception as error:
+            failed.append({"path": key, "error": str(error)})
+
+    summary = store.project_data_summary()
+    return {"ok": not failed, "synced_files": synced, "failed": failed[:20], "summary": summary}
+
+
 def retrieve_codex_memories(query: str, limit: int = 5) -> List[Dict[str, Any]]:
     seed_codex_foundation_memory()
     try:
@@ -2541,7 +2762,7 @@ async def execute_task(task: Any) -> None:
     await broadcast({"kind": "snapshot", "data": runtime_snapshot()})
     await asyncio.sleep(0.8)
 
-    artifact = record_generated_code_for_task(task.id)
+    artifact = await asyncio.to_thread(record_generated_code_for_task, task.id)
     runtime.record("code_generated", task.owner_id, f"自动生成代码产物：{artifact['target_key']}", task.id)
     runtime.complete_task(task.id)
     issue = store.update_issue_status_by_task_id(task.id, "done")
@@ -2592,10 +2813,12 @@ async def execute_collaborative_dev_task(task: Any) -> None:
     await broadcast({"kind": "snapshot", "data": runtime_snapshot()})
     await asyncio.sleep(0.9)
 
-    frontend_artifact = record_generated_code_for_task(task.id, "frontend")
-    backend_artifact = record_generated_code_for_task(task.id, "backend")
-    tester_artifact = record_generated_code_for_task(task.id, "tester")
-    reviewer_artifact = record_generated_code_for_task(task.id, "reviewer")
+    frontend_artifact, backend_artifact, tester_artifact, reviewer_artifact = await asyncio.gather(
+        asyncio.to_thread(record_generated_code_for_task, task.id, "frontend"),
+        asyncio.to_thread(record_generated_code_for_task, task.id, "backend"),
+        asyncio.to_thread(record_generated_code_for_task, task.id, "tester"),
+        asyncio.to_thread(record_generated_code_for_task, task.id, "reviewer"),
+    )
     runtime.record("code_generated", "frontend", f"前端 Agent 产出业务代码：{frontend_artifact['target_key']}", task.id)
     runtime.record("code_generated", "backend", f"后端 Agent 产出业务代码：{backend_artifact['target_key']}", task.id)
     runtime.record("code_generated", "tester", f"测试 Agent 产出测试代码：{tester_artifact['target_key']}", task.id)
@@ -2811,12 +3034,21 @@ def validate_cross_language_compatibility(project_path: Path) -> Dict[str, Any]:
         backend_text = (project_path / "app" / "main.py").read_text(encoding="utf-8", errors="ignore")
         frontend_text = (project_path / "app" / "static" / "app.js").read_text(encoding="utf-8", errors="ignore")
         test_text = (project_path / "tests" / "test_smoke.py").read_text(encoding="utf-8", errors="ignore")
-        checks = [
-            ("后端缺少 /api/health", '"/api/health"' in backend_text),
-            ("后端缺少 /api/tasks", '"/api/tasks"' in backend_text),
-            ("前端未调用 /api/tasks", '"/api/tasks"' in frontend_text or "'/api/tasks'" in frontend_text),
-            ("测试缺少跨语言兼容性断言", "compatibility" in test_text or "cross_language" in test_text),
-        ]
+        if "/api/books" in backend_text or "library-admin-app" in frontend_text:
+            checks = [
+                ("图书馆后端缺少 /api/books", '"/api/books"' in backend_text),
+                ("图书馆后端缺少统计接口", '"/api/books/stats"' in backend_text),
+                ("图书馆后端缺少语义检索接口", "semantic-search" in backend_text),
+                ("图书馆前端仍不是后台系统界面", "library-admin-app" in frontend_text and "injectLibraryStyles" in frontend_text),
+                ("图书馆测试缺少领域断言", "test_library_catalog_flow" in test_text),
+            ]
+        else:
+            checks = [
+                ("后端缺少 /api/health", '"/api/health"' in backend_text),
+                ("后端缺少业务列表 API", re.search(r'"/api/(tasks|customers|orders|employees|items)"', backend_text) is not None),
+                ("前端未调用业务列表 API", re.search(r'`/api/\\$\\{state\\.apiBase\\}`|"/api/(tasks|customers|orders|employees|items)"|\'/api/(tasks|customers|orders|employees|items)\'', frontend_text) is not None),
+                ("测试缺少跨语言兼容性断言", "compatibility" in test_text or "cross_language" in test_text),
+            ]
     failed = [reason for reason, ok in checks if not ok]
     if failed:
         return {
@@ -2832,6 +3064,8 @@ def business_project_files(title: str, task_id: str) -> Dict[str, str]:
     safe_title = spec["title"]
     entity_label = spec["entity_label"]
     owner_label = spec["owner_label"]
+    if spec["domain"] == "library" and spec["scope"] != "frontend_only":
+        return library_fullstack_project_files(task_id, safe_title, spec)
     if spec["scope"] == "frontend_only" and spec["framework"] == "vue3":
         return vue3_frontend_project_files(task_id, safe_title, spec)
     return {
@@ -2841,56 +3075,39 @@ def business_project_files(title: str, task_id: str) -> Dict[str, str]:
         "start.bat": "@echo off\npython -m uvicorn app.main:app --host 127.0.0.1 --port 9000\n",
         "app/__init__.py": "",
         "app/main.py": generated_backend_main_py(task_id, safe_title, spec),
-        "app/static/index.html": f"""<!doctype html>
+        "app/static/index.html": generated_workspace_index_html(safe_title),
+        "app/static/styles.css": generated_workspace_css(),
+        "app/static/app.js": generated_frontend_app_js(task_id, safe_title, spec),
+        "tests/test_smoke.py": generated_smoke_tests(task_id, safe_title, spec),
+        "docs/review-checklist.md": generated_review_checklist(task_id, safe_title, spec),
+    }
+
+
+def library_fullstack_project_files(task_id: str, title: str, spec: Dict[str, Any]) -> Dict[str, str]:
+    return {
+        "README.md": generated_library_readme(task_id, title),
+        "requirements.txt": "fastapi>=0.110\nuvicorn>=0.29\npydantic>=2\nhttpx>=0.27\n",
+        "start.ps1": "$ErrorActionPreference = \"Stop\"\npython -m uvicorn app.main:app --host 127.0.0.1 --port 9000\n",
+        "start.bat": "@echo off\npython -m uvicorn app.main:app --host 127.0.0.1 --port 9000\n",
+        "app/__init__.py": "",
+        "app/main.py": generated_library_backend_main_py(task_id, title),
+        "app/static/index.html": """<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{safe_title}</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <title>多模态智能图书馆管理系统</title>
   </head>
   <body>
-    <main class="shell">
-      <header class="hero">
-        <span>QuantumFlow Delivery</span>
-        <h1>{safe_title}</h1>
-        <p>由前端 Agent、后端 Agent、测试 Agent 和 Reviewer 独立分工生成的可运行业务系统。</p>
-      </header>
-      <section class="stats">
-        <article><strong id="statTotal">0</strong><span>全部{entity_label}</span></article>
-        <article><strong id="statActive">0</strong><span>进行中</span></article>
-        <article><strong id="statDone">0</strong><span>已完成</span></article>
-      </section>
-      <section class="toolbar">
-        <div class="filters">
-          <button class="active" data-filter="all">全部</button>
-          <button data-filter="pending">等待</button>
-          <button data-filter="active">进行中</button>
-          <button data-filter="blocked">阻塞</button>
-          <button data-filter="done">完成</button>
-        </div>
-        <input id="taskSearch" placeholder="搜索{entity_label}、负责人或状态" />
-      </section>
-      <form id="taskForm" class="task-form">
-        <input id="taskTitle" placeholder="输入{entity_label}名称" />
-        <input id="taskOwner" placeholder="{owner_label}" value="{owner_label}" />
-        <select id="taskPriority">
-          <option value="normal">普通</option>
-          <option value="high">高</option>
-          <option value="urgent">紧急</option>
-        </select>
-        <button>创建任务</button>
-      </form>
-      <section id="taskList" class="task-list"></section>
-    </main>
+    <div id="app"></div>
     <script src="/static/app.js"></script>
   </body>
 </html>
 """,
-        "app/static/styles.css": ":root{color-scheme:dark;font-family:Inter,'Microsoft YaHei',sans-serif}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#0a0f1b;color:#edf3ff}.shell{width:min(1180px,calc(100vw - 32px));margin:0 auto;padding:32px 0}.hero,.stats article,.toolbar,.task-form,.task-card{border:1px solid #26365f;background:#101827;border-radius:8px}.hero{padding:28px}.hero span{color:#2fe098;font-weight:900}.hero h1{margin:8px 0 10px;font-size:clamp(28px,4vw,48px)}.hero p{margin:0;color:#9fb0cc}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:16px 0}.stats article{padding:18px}.stats strong{display:block;font-size:30px}.stats span,.task-card small{color:#9fb0cc}.toolbar{display:flex;justify-content:space-between;gap:12px;padding:12px;margin-bottom:12px}.filters{display:flex;flex-wrap:wrap;gap:8px}.task-form{display:grid;grid-template-columns:1fr 180px 140px 120px;gap:10px;padding:12px;margin-bottom:14px}input,select,button{height:42px;border:1px solid #2d3b67;border-radius:7px;background:#0d1428;color:#edf3ff;padding:0 12px}button{cursor:pointer;font-weight:800}.filters button.active,.task-form button{background:#1097a7;border-color:#21d6e7}.task-list{display:grid;gap:10px}.task-card{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:16px}.task-card strong{display:block;margin-bottom:6px}.actions{display:flex;flex-wrap:wrap;gap:8px}.empty{color:#9fb0cc}@media(max-width:820px){.stats,.task-form,.task-card{grid-template-columns:1fr}.toolbar{display:grid}.actions button{flex:1}}\n",
-        "app/static/app.js": generated_frontend_app_js(task_id, safe_title, spec),
-        "tests/test_smoke.py": generated_smoke_tests(task_id, safe_title, spec),
-        "docs/review-checklist.md": generated_review_checklist(task_id, safe_title, spec),
+        "app/static/styles.css": "/* styles are injected by app.js so previews never degrade to unstyled HTML. */\n",
+        "app/static/app.js": generated_library_frontend_app_js(task_id, title),
+        "tests/test_smoke.py": generated_library_smoke_tests(task_id),
+        "docs/review-checklist.md": generated_library_review_checklist(task_id, title),
     }
 
 
@@ -2940,6 +3157,218 @@ def vue3_frontend_project_files(task_id: str, title: str, spec: Dict[str, Any]) 
 
 def library_app_title(_title: str) -> str:
     return "图书管理系统"
+
+
+def generated_library_backend_main_py(task_id: str, title: str) -> str:
+    return f'''from __future__ import annotations
+
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+STATIC_ROOT = ROOT / "static"
+
+app = FastAPI(title="多模态智能图书馆管理系统", version="1.0.0")
+app.mount("/static", StaticFiles(directory=STATIC_ROOT), name="static")
+
+
+class BookCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    author: str = Field(min_length=1, max_length=80)
+    category: str = "综合"
+    publisher: str = "未知出版社"
+    publish_date: str = "2026"
+    status: str = "在馆"
+    summary: str = ""
+
+
+books = [
+    {{"id": 1, "accessionNo": "B-2026-001", "title": "人月神话", "author": "Frederick P. Brooks", "category": "软件工程", "publisher": "Addison-Wesley", "publishDate": "1975", "status": "在馆", "summary": "软件工程经典，适合项目管理与复杂度理解。", "embeddingTags": ["工程", "管理", "复杂度"]}},
+    {{"id": 2, "accessionNo": "B-2026-002", "title": "代码大全", "author": "Steve McConnell", "category": "编程实践", "publisher": "Microsoft Press", "publishDate": "2004", "status": "借出", "summary": "代码构建、质量和可维护性实践。", "embeddingTags": ["代码", "质量", "工程实践"]}},
+    {{"id": 3, "accessionNo": "B-2026-003", "title": "深入理解计算机系统", "author": "Randal E. Bryant", "category": "计算机系统", "publisher": "Pearson", "publishDate": "2015", "status": "预约", "summary": "系统结构、内存、链接与程序执行。", "embeddingTags": ["系统", "底层", "计算机"]}},
+]
+allowed_status = {{"在馆", "借出", "预约", "维护"}}
+
+
+@app.get("/")
+def index() -> FileResponse:
+    return FileResponse(STATIC_ROOT / "index.html")
+
+
+@app.get("/api/health")
+def health():
+    return {{"ok": True, "service": "library", "task_id": {task_id!r}, "title": {title!r}}}
+
+
+@app.get("/api/books")
+def list_books(q: str = "", category: str = "全部", status: str = "全部"):
+    query = q.strip().lower()
+    result = books
+    if query:
+        result = [book for book in result if query in f"{{book['title']}} {{book['author']}} {{book['category']}} {{book['summary']}}".lower()]
+    if category != "全部":
+        result = [book for book in result if book["category"] == category]
+    if status != "全部":
+        result = [book for book in result if book["status"] == status]
+    return result
+
+
+@app.get("/api/books/stats")
+def book_stats():
+    return {{
+        "total": len(books),
+        "available": sum(1 for book in books if book["status"] == "在馆"),
+        "borrowed": sum(1 for book in books if book["status"] == "借出"),
+        "reserved": sum(1 for book in books if book["status"] == "预约"),
+        "categories": sorted({{book["category"] for book in books}}),
+    }}
+
+
+@app.post("/api/books")
+def create_book(payload: BookCreate):
+    if payload.status not in allowed_status:
+        raise HTTPException(status_code=400, detail="invalid book status")
+    next_id = max([book["id"] for book in books] + [0]) + 1
+    item = {{
+        "id": next_id,
+        "accessionNo": f"B-2026-{{next_id:03d}}",
+        "publishDate": payload.publish_date,
+        "embeddingTags": [payload.category, payload.author],
+        **payload.model_dump(exclude={{"publish_date"}}),
+    }}
+    books.insert(0, item)
+    return item
+
+
+@app.patch("/api/books/{{book_id}}/status")
+def update_book_status(book_id: int, status: str):
+    if status not in allowed_status:
+        raise HTTPException(status_code=400, detail="invalid book status")
+    for book in books:
+        if book["id"] == book_id:
+            book["status"] = status
+            return book
+    raise HTTPException(status_code=404, detail="book not found")
+
+
+@app.get("/api/books/semantic-search")
+def semantic_search(q: str = Query(..., min_length=1)):
+    query = q.lower()
+    ranked = sorted(
+        books,
+        key=lambda book: sum(tag.lower() in query or query in tag.lower() for tag in book.get("embeddingTags", [])),
+        reverse=True,
+    )
+    return [{{"score": 0.92 if index == 0 else 0.72, **book}} for index, book in enumerate(ranked[:5])]
+'''
+
+
+def generated_library_frontend_app_js(task_id: str, title: str) -> str:
+    return f'''const state = {{
+  taskId: {task_id!r},
+  q: "",
+  category: "全部",
+  status: "全部",
+  semantic: "",
+  books: [],
+  stats: {{}},
+  semanticHits: [],
+}};
+
+const fallbackBooks = [
+  {{ id: 1, accessionNo: "B-2026-001", title: "人月神话", author: "Frederick P. Brooks", category: "软件工程", publisher: "Addison-Wesley", publishDate: "1975", status: "在馆", summary: "软件工程经典。" }},
+  {{ id: 2, accessionNo: "B-2026-002", title: "代码大全", author: "Steve McConnell", category: "编程实践", publisher: "Microsoft Press", publishDate: "2004", status: "借出", summary: "代码质量实践。" }},
+  {{ id: 3, accessionNo: "B-2026-003", title: "深入理解计算机系统", author: "Randal E. Bryant", category: "计算机系统", publisher: "Pearson", publishDate: "2015", status: "预约", summary: "系统结构与程序执行。" }},
+];
+const statuses = ["全部", "在馆", "借出", "预约", "维护"];
+
+function injectLibraryStyles() {{
+  if (document.getElementById("libraryGeneratedStyles")) return;
+  const style = document.createElement("style");
+  style.id = "libraryGeneratedStyles";
+  style.textContent = `
+    *{{box-sizing:border-box}} body{{margin:0;background:#eef3f8;color:#172033;font-family:"Segoe UI","Microsoft YaHei",Arial,sans-serif}} button,input,select{{font:inherit}} .library-admin-app{{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100vh}} .library-sidebar{{background:#123f61;color:#fff;padding:18px 14px;display:grid;align-content:start;gap:10px}} .library-sidebar strong{{font-size:18px;margin-bottom:8px}} .library-sidebar button{{height:38px;border:1px solid rgba(255,255,255,.16);border-radius:6px;background:#18577f;color:#eaf7ff;text-align:left;padding:0 10px;cursor:pointer}} .library-sidebar button.active{{background:#1d8bc8}} .library-main{{min-width:0;padding:18px 22px}} .library-topbar{{height:64px;display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid #c4d5e3;border-radius:8px;padding:0 18px;margin-bottom:14px}} .library-topbar h1{{margin:0;font-size:24px}} .library-topbar span{{color:#496272;font-size:13px}} .library-stats{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}} .library-stats article,.library-toolbar,.library-form,.semantic-box,.library-table-wrap,.semantic-results article{{background:#fff;border:1px solid #c4d5e3;border-radius:8px;padding:12px}} .library-stats b{{display:block;font-size:26px;color:#0d6694}} .library-stats span{{color:#526575;font-size:12px}} .library-toolbar,.library-form,.semantic-box{{display:grid;grid-template-columns:minmax(240px,1fr) 180px 160px 100px;gap:10px;margin-bottom:10px}} .library-form{{grid-template-columns:repeat(4,minmax(130px,1fr)) 130px 90px}} .semantic-box{{grid-template-columns:minmax(260px,1fr) 120px}} input,select{{height:36px;border:1px solid #a8bdcc;border-radius:6px;background:#fff;color:#172033;padding:0 10px}} .library-toolbar button,.library-form button,.semantic-box button,.library-table button{{height:36px;border:1px solid #7fa6bf;background:#e7f2f8;color:#123f61;border-radius:6px;cursor:pointer;font-weight:700}} .library-table{{width:100%;border-collapse:collapse;font-size:13px}} .library-table th{{background:#dce8f1;color:#17324a;border-bottom:1px solid #a7bbc9;text-align:left;padding:9px}} .library-table td{{border-bottom:1px solid #d8e3ec;padding:9px;vertical-align:middle}} .library-table b{{color:#08795f}} .library-table td:last-child{{display:flex;flex-wrap:wrap;gap:6px}} .semantic-results{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:12px}} .semantic-results strong,.semantic-results span{{display:block}} .semantic-results span{{color:#526575;font-size:12px;margin-top:4px}} @media(max-width:900px){{.library-admin-app{{grid-template-columns:1fr}}.library-sidebar{{display:none}}.library-stats,.library-toolbar,.library-form,.semantic-box{{grid-template-columns:1fr}}.library-table-wrap{{overflow:auto}}.library-table{{min-width:760px}}}}
+  `;
+  document.head.appendChild(style);
+}}
+
+async function api(path, options = {{}}) {{
+  const response = await fetch(path, {{ ...options, headers: {{ "Content-Type": "application/json", ...(options.headers || {{}}) }} }});
+  if (!response.ok) throw new Error(`HTTP ${{response.status}}`);
+  return response.json();
+}}
+
+async function loadBooks() {{
+  const params = new URLSearchParams({{ q: state.q, category: state.category, status: state.status }});
+  try {{
+    state.books = await api(`/api/books?${{params}}`);
+    state.stats = await api("/api/books/stats");
+  }} catch {{
+    state.books = [...fallbackBooks];
+    state.stats = {{ total: state.books.length, available: 1, borrowed: 1, reserved: 1, categories: [...new Set(state.books.map((book) => book.category))] }};
+  }}
+  renderLibrary();
+}}
+
+async function createBook(event) {{
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  await api("/api/books", {{ method: "POST", body: JSON.stringify(payload) }}).catch(() => state.books.unshift({{ id: Date.now(), accessionNo: "LOCAL", ...payload }}));
+  event.currentTarget.reset();
+  await loadBooks();
+}}
+
+async function setBookStatus(id, status) {{
+  await api(`/api/books/${{id}}/status?status=${{encodeURIComponent(status)}}`, {{ method: "PATCH" }}).catch(() => {{
+    const book = state.books.find((item) => item.id === id);
+    if (book) book.status = status;
+  }});
+  await loadBooks();
+}}
+
+async function semanticSearch() {{
+  if (!state.semantic.trim()) return;
+  state.semanticHits = await api(`/api/books/semantic-search?q=${{encodeURIComponent(state.semantic)}}`).catch(() => state.books.slice(0, 3).map((book) => ({{ score: 0.72, ...book }})));
+  renderLibrary();
+}}
+
+function renderLibrary() {{
+  injectLibraryStyles();
+  const root = document.getElementById("app") || document.body;
+  const categories = ["全部", ...(state.stats.categories || [...new Set(state.books.map((book) => book.category))])];
+  root.innerHTML = `
+    <main class="library-admin-app">
+      <aside class="library-sidebar"><strong>智能图书馆</strong><button class="active">馆藏管理</button><button>借阅流转</button><button>语义检索</button><button>报表</button></aside>
+      <section class="library-main">
+        <header class="library-topbar"><h1>多模态智能图书馆管理系统</h1><span>Python + FastAPI / Semantic Ready</span></header>
+        <div class="library-stats"><article><b>${{state.stats.total || state.books.length}}</b><span>馆藏</span></article><article><b>${{state.stats.available || 0}}</b><span>在馆</span></article><article><b>${{state.stats.borrowed || 0}}</b><span>借出</span></article><article><b>${{state.stats.reserved || 0}}</b><span>预约</span></article></div>
+        <div class="library-toolbar"><input id="q" placeholder="搜索书名、作者、分类" value="${{escapeHtml(state.q)}}"/><select id="category">${{categories.map((item) => `<option ${{item === state.category ? "selected" : ""}}>${{item}}</option>`).join("")}}</select><select id="status">${{statuses.map((item) => `<option ${{item === state.status ? "selected" : ""}}>${{item}}</option>`).join("")}}</select><button id="filterBtn">筛选</button></div>
+        <form id="bookForm" class="library-form"><input name="title" placeholder="书名" required/><input name="author" placeholder="作者" required/><input name="category" placeholder="分类"/><input name="publisher" placeholder="出版社"/><select name="status"><option>在馆</option><option>借出</option><option>预约</option><option>维护</option></select><button>入库</button></form>
+        <div class="semantic-box"><input id="semanticInput" placeholder="语义检索：例如 系统底层 / 代码质量" value="${{escapeHtml(state.semantic)}}"/><button id="semanticBtn">智能检索</button></div>
+        <section class="library-table-wrap"><table class="library-table"><thead><tr><th>编号</th><th>书名</th><th>作者</th><th>分类</th><th>状态</th><th>操作</th></tr></thead><tbody>${{state.books.map(renderBookRow).join("")}}</tbody></table></section>
+        <section class="semantic-results">${{state.semanticHits.map((book) => `<article><strong>${{escapeHtml(book.title)}}</strong><span>score ${{book.score}} / ${{escapeHtml(book.summary || "")}}</span></article>`).join("")}}</section>
+      </section>
+    </main>`;
+  document.getElementById("bookForm")?.addEventListener("submit", createBook);
+  document.getElementById("filterBtn")?.addEventListener("click", () => {{ state.q = document.getElementById("q").value; state.category = document.getElementById("category").value; state.status = document.getElementById("status").value; loadBooks(); }});
+  document.getElementById("semanticBtn")?.addEventListener("click", () => {{ state.semantic = document.getElementById("semanticInput").value; semanticSearch(); }});
+}}
+
+function renderBookRow(book) {{
+  const buttons = ["在馆", "借出", "预约", "维护"].map((status) => `<button onclick="setBookStatus(${{book.id}}, '${{status}}')">${{status}}</button>`).join("");
+  return `<tr><td>${{book.accessionNo || book.id}}</td><td>${{escapeHtml(book.title)}}</td><td>${{escapeHtml(book.author)}}</td><td>${{escapeHtml(book.category)}}</td><td><b>${{escapeHtml(book.status)}}</b></td><td>${{buttons}}</td></tr>`;
+}}
+
+function escapeHtml(value) {{
+  return String(value || "").replace(/[&<>"']/g, (char) => ({{ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }}[char]));
+}}
+
+loadBooks();
+'''
+
 
 
 def generated_vue3_library_main_js(task_id: str, title: str, books: List[Dict[str, str]]) -> str:
@@ -3073,6 +3502,79 @@ const App = {{
 }};
 
 createApp(App).mount("#app");
+"""
+
+
+def generated_library_smoke_tests(task_id: str) -> str:
+    return f'''from fastapi.testclient import TestClient
+
+from app.main import app
+
+
+client = TestClient(app)
+
+
+def test_library_catalog_flow():
+    health = client.get("/api/health").json()
+    assert health["service"] == "library"
+    assert health["task_id"] == {task_id!r}
+    books = client.get("/api/books").json()
+    assert any(book["title"] == "人月神话" for book in books)
+    assert client.get("/api/books/stats").json()["total"] >= 3
+
+
+def test_create_filter_status_and_semantic_search():
+    created = client.post(
+        "/api/books",
+        json={{"title": "Python 深度学习", "author": "Francois Chollet", "category": "AI", "publisher": "Manning"}},
+    ).json()
+    assert created["status"] == "在馆"
+    filtered = client.get("/api/books", params={{"q": "Python", "category": "AI"}}).json()
+    assert any(book["title"] == "Python 深度学习" for book in filtered)
+    updated = client.patch(f"/api/books/{{created['id']}}/status", params={{"status": "借出"}}).json()
+    assert updated["status"] == "借出"
+    hits = client.get("/api/books/semantic-search", params={{"q": "系统 底层"}}).json()
+    assert hits and "score" in hits[0]
+'''
+
+
+def generated_library_review_checklist(task_id: str, title: str) -> str:
+    return f"""# 多模态智能图书馆 Reviewer 审查清单
+
+任务：{title}
+任务 ID：{task_id}
+
+## 必须通过
+
+- [x] 后端生成图书馆领域 API，不再使用通用 `/api/tasks` 看板。
+- [x] 包含 `/api/books`、`/api/books/stats`、`/api/books/{{id}}/status`、`/api/books/semantic-search`。
+- [x] 前端自注入样式，预览页不会退化成裸 HTML 表格。
+- [x] 前端呈现馆藏统计、筛选、入库、借阅状态、语义检索。
+- [x] 测试覆盖图书创建、筛选、状态流转和语义检索契约。
+"""
+
+
+def generated_library_readme(task_id: str, title: str) -> str:
+    return f"""# 多模态智能图书馆管理系统
+
+这是 QuantumFlow 根据需求生成的 FastAPI + 静态前端图书馆后台。
+
+## 功能
+
+- 馆藏列表、状态统计、分类/状态筛选
+- 新书入库
+- 借阅状态流转：在馆、借出、预约、维护
+- 语义检索接口占位：`/api/books/semantic-search`
+
+## 运行
+
+```powershell
+pip install -r requirements.txt
+python -m uvicorn app.main:app --host 127.0.0.1 --port 9000
+```
+
+任务 ID：{task_id}
+原始需求：{title}
 """
 
 
@@ -3316,28 +3818,57 @@ def record_generated_code_for_task(task_id: str, agent_id: str | None = None, su
     owner_id = agent_id or task.owner_id
     agent = runtime.agents[owner_id]
     target_key = target_key_for_agent(owner_id, task.title)
-    code_text = generated_code_text(f"{task_id}_{suffix}" if suffix else task_id, task.title, owner_id)
+    step = suffix or owner_id
+    template_id = f"{task_id}_{suffix}" if suffix else task_id
+
+    # Real agent work: call the LLM through the resilience layer (retry +
+    # circuit breaker + idempotency). The deterministic template is the
+    # graceful fallback so the pipeline still completes without API keys.
+    result = generate_agent_code(
+        agent_id=owner_id,
+        task_id=task_id,
+        title=task.title,
+        target_key=target_key,
+        fallback=lambda: generated_code_text(template_id, task.title, owner_id),
+        step=step,
+    )
+    code_text = result["code"]
+    source = result["source"]
+
     validation = validate_generated_code(target_key, code_text)
+    if not validation["ok"] and source == "llm":
+        # LLM output failed validation: fall back to the trusted template.
+        code_text = generated_code_text(template_id, task.title, owner_id)
+        validation = validate_generated_code(target_key, code_text)
+        source = "fallback"
     status = "validated" if validation["ok"] else "rejected"
-    explanation = f"{agent.name} 根据任务《{task.title}》自动生成。校验：{validation['reason']}"
-    store.record_task_log(task_id, owner_id, agent.role, "artifact_validation", target_key, validation["reason"], status="ok" if validation["ok"] else "failed")
+    source_label = {"llm": "LLM 生成", "cache": "幂等缓存复用", "fallback": "模板兜底"}.get(source, source)
+    explanation = (
+        f"{agent.name} 根据任务《{task.title}》产出（来源：{source_label}，"
+        f"尝试 {result['attempts']} 次）。校验：{validation['reason']}"
+    )
+    if result.get("error"):
+        explanation += f" 备注：{result['error']}"
+    store.record_task_log(
+        task_id,
+        owner_id,
+        agent.role,
+        "artifact_validation",
+        target_key,
+        f"[{source}] {validation['reason']}",
+        status="ok" if validation["ok"] else "failed",
+    )
     return store.record_code_artifact(task_id, owner_id, target_key, code_text, explanation, status=status)
 
 
 def validate_generated_code(target_key: str, code_text: str) -> Dict[str, Any]:
     if not code_text.strip():
         return {"ok": False, "reason": "产物为空，拒绝进入代码区。"}
-    if target_key.endswith(".py"):
-        try:
-            ast.parse(code_text)
-        except SyntaxError as exc:
-            return {"ok": False, "reason": f"Python 语法错误：line {exc.lineno}"}
-        return {"ok": True, "reason": "Python 语法校验通过，可进入 Review。"}
-    if target_key.endswith(".js"):
-        if "const " not in code_text and "function " not in code_text:
-            return {"ok": False, "reason": "JavaScript 缺少可执行声明。"}
-        return {"ok": True, "reason": "JavaScript 基础结构校验通过，可进入 Review。"}
-    return {"ok": True, "reason": "文本产物已生成，可进入 Review。"}
+    validation = validate_code_text(target_key, code_text)
+    if not validation["ok"]:
+        return validation
+    language = validation.get("language", "text")
+    return {"ok": True, "reason": f"{language} 兼容性校验通过，可进入 Review。", "language": language}
 
 
 def is_legacy_stub_artifact(artifact: Dict[str, Any]) -> bool:
@@ -3379,7 +3910,12 @@ def analyze_business_spec(title: str, task_id: str) -> Dict[str, Any]:
         word in lowered for word in ["后端", "接口", "api", "数据库", "全栈"]
     )
     framework = "vue3" if any(word in lowered for word in ["vue3", "vue 3", "vue"]) else "vanilla"
-    if any(word in lowered for word in ["图书", "图书馆", "书籍", "借阅", "library", "book"]):
+    library_signal = any(word in lowered for word in ["图书", "图书馆", "书籍", "借阅", "馆藏", "库存", "归还", "library", "book", "catalog", "isbn"])
+    library_signal = library_signal or (
+        any(word in lowered for word in ["langchain", "faiss", "gpt-4v", "gpt4v", "embedding", "semantic"])
+        and any(word in lowered for word in ["fastapi", "python", "vue", "api", "检索", "识别", "多模态"])
+    )
+    if library_signal:
         domain = "library"
         entity_label = "图书"
         owner_label = "馆藏管理员"
@@ -3409,6 +3945,7 @@ def analyze_business_spec(title: str, task_id: str) -> Dict[str, Any]:
         entity_label = "业务事项"
         owner_label = "负责人"
         seed_items = ["需求确认", "执行推进", "结果验收"]
+    blueprint = build_system_blueprint(raw_title, domain, entity_label, owner_label)
     return {
         "task_id": task_id,
         "title": raw_title,
@@ -3418,12 +3955,141 @@ def analyze_business_spec(title: str, task_id: str) -> Dict[str, Any]:
         "domain": domain,
         "framework": framework,
         "scope": "frontend_only" if frontend_only else "fullstack",
+        "blueprint": blueprint,
+    }
+
+
+def build_system_blueprint(raw_text: str, domain: str, entity_label: str, owner_label: str) -> Dict[str, Any]:
+    text = raw_text.strip()
+    lowered = text.lower()
+    has_auth = bool(re.search(r"登录|注册|认证|权限|角色|auth|login|user", text, re.I))
+    has_search = bool(re.search(r"搜索|检索|筛选|查询|search|filter|semantic|faiss|向量", text, re.I))
+    has_media = bool(re.search(r"多模态|图片|拍照|封面|识别|ocr|vision|gpt-?4v", text, re.I))
+    has_inventory = bool(re.search(r"库存|入库|出库|馆藏|借阅|归还|订单|状态|流转", text, re.I))
+    has_report = bool(re.search(r"统计|报表|看板|dashboard|分析", text, re.I))
+
+    modules = [
+        {"name": f"{entity_label}管理", "description": f"{entity_label}列表、详情、创建、编辑和状态维护。"},
+        {"name": "运行与验收", "description": "健康检查、启动脚本、烟测和 Reviewer 清单。"},
+    ]
+    if has_auth:
+        modules.insert(0, {"name": "用户认证与权限", "description": "登录态、角色边界和受保护接口。"})
+    if has_search:
+        modules.append({"name": "检索与筛选", "description": "关键词检索、条件筛选和语义检索接口占位。"})
+    if has_media:
+        modules.append({"name": "多模态识别", "description": "图片上传/识别流程和外部 AI 服务接入占位。"})
+    if has_inventory:
+        modules.append({"name": "状态流转", "description": "核心业务状态切换、审计事件和异常反馈。"})
+    if has_report:
+        modules.append({"name": "统计看板", "description": "总量、状态分布和关键指标。"})
+
+    statuses = ["pending", "active", "blocked", "done"]
+    if domain == "library":
+        statuses = ["available", "borrowed", "reserved", "maintenance"]
+    elif domain == "order":
+        statuses = ["pending", "paid", "shipping", "refunded"]
+    elif domain == "crm":
+        statuses = ["lead", "contacted", "negotiating", "won"]
+
+    entities = [
+        {
+            "name": entity_label,
+            "fields": ["id", "title", "owner", "status", "priority", "created_at", "updated_at"],
+            "statuses": statuses,
+        }
+    ]
+    if has_auth:
+        entities.append({"name": "用户", "fields": ["id", "name", "role", "last_login"], "statuses": ["active", "disabled"]})
+    if has_media:
+        entities.append({"name": "识别任务", "fields": ["id", "image_url", "result", "confidence", "status"], "statuses": ["queued", "matched", "failed"]})
+
+    api_prefix = "tasks"
+    if domain == "library":
+        api_prefix = "books"
+    elif domain == "crm":
+        api_prefix = "customers"
+    elif domain == "order":
+        api_prefix = "orders"
+    elif domain == "hr":
+        api_prefix = "employees"
+
+    endpoints = [
+        f"GET /api/{api_prefix}",
+        f"POST /api/{api_prefix}",
+        f"PATCH /api/{api_prefix}/{{id}}",
+        "GET /api/health",
+    ]
+    if has_search:
+        endpoints.append(f"GET /api/{api_prefix}/search")
+    if has_report:
+        endpoints.append(f"GET /api/{api_prefix}/stats")
+    if has_media:
+        endpoints.append(f"POST /api/{api_prefix}/vision-match")
+
+    views = [
+        f"{entity_label}列表页",
+        f"{entity_label}创建/编辑表单",
+        "状态流转操作区",
+    ]
+    if has_search:
+        views.append("检索筛选区")
+    if has_report:
+        views.append("统计看板")
+    if has_media:
+        views.append("多模态识别入口")
+
+    workflows = [
+        f"{owner_label}创建{entity_label}并进入默认状态。",
+        f"使用者按关键词/状态定位{entity_label}。",
+        f"{owner_label}更新状态，系统记录更新时间并刷新前端。",
+    ]
+    if has_auth:
+        workflows.insert(0, "用户登录后按角色进入对应工作台。")
+    if has_media:
+        workflows.append("上传图片后生成识别结果，并与现有业务数据匹配。")
+
+    acceptance = [
+        "项目必须包含可运行入口、前端页面、后端 API、测试和 Review 清单。",
+        "生成内容必须引用需求里的实体、流程和技术栈，不能只改标题。",
+        "前后端接口路径、字段名、状态枚举必须一致。",
+        "空状态、异常请求和核心状态流转必须有可见反馈。",
+    ]
+    if "mysql" in lowered or "redis" in lowered or "faiss" in lowered or "langchain" in lowered:
+        acceptance.append("外部中间件或 AI 能力未真实接入时，必须保留清晰的适配层/占位接口，不能伪装已上线。")
+
+    return {
+        "summary": f"按需求生成 {entity_label} 领域系统，而不是通用任务模板。",
+        "roles": [owner_label, "普通使用者", "Reviewer"],
+        "modules": modules,
+        "entities": entities,
+        "api_prefix": api_prefix,
+        "endpoints": endpoints,
+        "views": views,
+        "workflows": workflows,
+        "acceptance": acceptance,
+        "signals": {
+            "auth": has_auth,
+            "search": has_search,
+            "media": has_media,
+            "inventory": has_inventory,
+            "report": has_report,
+        },
     }
 
 
 def generated_code_text(task_id: str, title: str, owner_id: str) -> str:
     safe_title = title.replace("\n", " ").strip() or "QuantumFlow Generated Project"
     spec = analyze_business_spec(safe_title, task_id)
+    if spec["domain"] == "library" and spec["scope"] != "frontend_only":
+        if owner_id == "frontend":
+            return generated_library_frontend_app_js(task_id, safe_title)
+        if owner_id == "backend":
+            return generated_library_backend_main_py(task_id, safe_title)
+        if owner_id == "tester":
+            return generated_library_smoke_tests(task_id)
+        if owner_id == "reviewer":
+            return generated_library_review_checklist(task_id, safe_title)
+        return generated_library_readme(task_id, safe_title)
     if spec["scope"] == "frontend_only" and spec["framework"] == "vue3":
         books = [
             {"title": "人月神话", "author": "Frederick P. Brooks", "category": "软件工程", "status": "在馆"},
@@ -3450,31 +4116,49 @@ def generated_code_text(task_id: str, title: str, owner_id: str) -> str:
     return generated_project_readme(task_id, safe_title, spec)
 
 
+def generated_workspace_index_html(title: str) -> str:
+    return f"""<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
+"""
+
+
+def generated_workspace_css() -> str:
+    return """:root{font-family:Inter,'Segoe UI','Microsoft YaHei',Arial,sans-serif;color:#1d2733;background:#eef2f6}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#eef2f6;color:#1d2733}button,input,select{font:inherit}.system-app{display:grid;grid-template-columns:236px minmax(0,1fr);min-height:100vh}.sidebar{background:#17324a;color:#fff;padding:18px 14px;display:grid;align-content:start;gap:8px}.brand{display:grid;gap:3px;margin-bottom:12px}.brand strong{font-size:18px}.brand span{font-size:12px;color:#b9d2e4}.nav-btn{height:40px;border:1px solid rgba(255,255,255,.14);border-radius:6px;background:#21445f;color:#eaf5fb;text-align:left;padding:0 11px;cursor:pointer}.nav-btn.active{background:#2b7ba8;border-color:#78bad7}.main{min-width:0;padding:18px 22px}.topbar{height:66px;background:#fff;border:1px solid #c7d5df;border-radius:8px;padding:0 18px;display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px}.topbar h1{margin:0;font-size:24px;line-height:1.2}.topbar p{margin:3px 0 0;color:#617282;font-size:13px}.primary{height:38px;border:1px solid #236b8e;border-radius:6px;background:#2479a5;color:#fff;font-weight:700;cursor:pointer;padding:0 14px}.layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:14px}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}.panel,.stat,.table-wrap,.form-panel{background:#fff;border:1px solid #c7d5df;border-radius:8px}.stat{padding:13px}.stat b{display:block;font-size:26px;color:#176b8f}.stat span{font-size:12px;color:#667787}.toolbar{display:grid;grid-template-columns:minmax(220px,1fr) 150px 110px;gap:9px;margin-bottom:10px}.toolbar input,.toolbar select,.form-grid input,.form-grid select{height:38px;border:1px solid #aebfcc;border-radius:6px;padding:0 10px;background:#fff}.table-wrap{overflow:auto}.data-table{width:100%;border-collapse:collapse;font-size:13px;min-width:760px}.data-table th{background:#e4edf3;text-align:left;color:#2c4052;padding:10px;border-bottom:1px solid #c0d0dc}.data-table td{padding:10px;border-bottom:1px solid #dde7ee;vertical-align:middle}.badge{display:inline-flex;align-items:center;height:24px;border-radius:999px;background:#e9f3f7;color:#12617d;padding:0 9px;font-size:12px;font-weight:700}.actions{display:flex;flex-wrap:wrap;gap:6px}.actions button{height:30px;border:1px solid #b4c5d0;background:#f5f9fb;border-radius:6px;cursor:pointer}.side-stack{display:grid;gap:12px}.panel{padding:14px}.panel h2{font-size:16px;margin:0 0 10px}.module-list,.flow-list,.acceptance-list{display:grid;gap:9px;margin:0;padding:0;list-style:none}.module-list li,.flow-list li,.acceptance-list li{border:1px solid #d7e2ea;border-radius:7px;padding:9px;background:#f8fbfd}.module-list strong{display:block;font-size:13px}.module-list span,.flow-list li,.acceptance-list li{font-size:12px;color:#5c6f7f}.form-panel{padding:12px;margin-bottom:12px}.form-grid{display:grid;grid-template-columns:minmax(160px,1fr) 150px 130px 96px;gap:9px}.empty{color:#697b8b;padding:18px}.toast{position:fixed;right:18px;bottom:18px;background:#17324a;color:#fff;border-radius:7px;padding:10px 13px;box-shadow:0 12px 30px rgba(20,40,55,.2)}@media(max-width:980px){.system-app{grid-template-columns:1fr}.sidebar{display:none}.layout{grid-template-columns:1fr}.stats,.toolbar,.form-grid{grid-template-columns:1fr}.main{padding:14px}.topbar{height:auto;align-items:flex-start;padding:14px;display:grid}.topbar h1{font-size:20px}} 
+"""
+
+
 def generated_frontend_app_js(task_id: str, title: str, spec: Dict[str, Any] | None = None) -> str:
     spec = spec or analyze_business_spec(title, task_id)
     entity_label = spec["entity_label"]
     owner_label = spec["owner_label"]
-    return f"""const state = {{
+    blueprint = spec.get("blueprint", {})
+    api_base = blueprint.get("api_prefix", "tasks")
+    blueprint_json = json.dumps(blueprint, ensure_ascii=False)
+    return f"""const blueprint = {blueprint_json};
+const state = {{
   taskId: {task_id!r},
   title: {title!r},
   entityLabel: {entity_label!r},
-  tasks: [],
+  ownerLabel: {owner_label!r},
+  apiBase: {api_base!r},
+  items: [],
   filters: {{ status: "all", query: "" }},
 }};
 
 const statusText = {{ pending: "等待", active: "进行中", blocked: "阻塞", done: "完成" }};
 const priorityText = {{ normal: "普通", high: "高", urgent: "紧急" }};
-const els = {{
-  list: document.getElementById("taskList"),
-  form: document.getElementById("taskForm"),
-  title: document.getElementById("taskTitle"),
-  owner: document.getElementById("taskOwner"),
-  priority: document.getElementById("taskPriority"),
-  query: document.getElementById("taskSearch"),
-  statTotal: document.getElementById("statTotal"),
-  statActive: document.getElementById("statActive"),
-  statDone: document.getElementById("statDone"),
-}};
+const root = document.getElementById("app");
 
 async function api(path, options = {{}}) {{
   const response = await fetch(path, {{
@@ -3487,13 +4171,13 @@ async function api(path, options = {{}}) {{
 }}
 
 async function loadTasks() {{
-  state.tasks = await api("/api/tasks");
+  state.items = await api(`/api/${{state.apiBase}}`);
   render();
 }}
 
 function visibleTasks() {{
   const query = state.filters.query.trim().toLowerCase();
-  return state.tasks.filter((task) => {{
+  return state.items.filter((task) => {{
     const matchesStatus = state.filters.status === "all" || task.status === state.filters.status;
     const text = `${{task.title}} ${{task.owner}} ${{task.priority}} ${{task.status}}`.toLowerCase();
     return matchesStatus && (!query || text.includes(query));
@@ -3501,62 +4185,107 @@ function visibleTasks() {{
 }}
 
 function render() {{
-  const tasks = visibleTasks();
-  els.statTotal.textContent = String(state.tasks.length);
-  els.statActive.textContent = String(state.tasks.filter((task) => task.status === "active").length);
-  els.statDone.textContent = String(state.tasks.filter((task) => task.status === "done").length);
-  els.list.innerHTML = tasks.length
-    ? tasks.map(renderTask).join("")
-    : `<p class="empty">暂无匹配${{state.entityLabel}}，先创建一个。</p>`;
+  const items = visibleTasks();
+  root.innerHTML = `
+    <main class="system-app">
+      <aside class="sidebar">
+        <div class="brand"><strong>${{escapeHtml(state.title)}}</strong><span>QuantumFlow System Blueprint</span></div>
+        ${{(blueprint.modules || []).map((item, index) => `<button class="nav-btn ${{index === 0 ? "active" : ""}}">${{escapeHtml(item.name)}}</button>`).join("")}}
+      </aside>
+      <section class="main">
+        <header class="topbar">
+          <div><h1>${{escapeHtml(state.title)}}</h1><p>${{escapeHtml(blueprint.summary || "按需求生成完整业务系统")}}</p></div>
+          <button class="primary" id="quickCreate">新增${{escapeHtml(state.entityLabel)}}</button>
+        </header>
+        <section class="layout">
+          <div>
+            <div class="stats">
+              <article class="stat"><b>${{state.items.length}}</b><span>全部${{escapeHtml(state.entityLabel)}}</span></article>
+              <article class="stat"><b>${{state.items.filter((item) => item.status === "active").length}}</b><span>处理中</span></article>
+              <article class="stat"><b>${{state.items.filter((item) => item.status === "done").length}}</b><span>已完成</span></article>
+              <article class="stat"><b>${{(blueprint.modules || []).length}}</b><span>系统模块</span></article>
+            </div>
+            <form id="taskForm" class="form-panel">
+              <div class="form-grid">
+                <input id="taskTitle" placeholder="${{escapeHtml(state.entityLabel)}}名称" required />
+                <input id="taskOwner" placeholder="${{escapeHtml(state.ownerLabel)}}" value="${{escapeHtml(state.ownerLabel)}}" />
+                <select id="taskPriority"><option value="normal">普通</option><option value="high">高</option><option value="urgent">紧急</option></select>
+                <button class="primary">创建</button>
+              </div>
+            </form>
+            <div class="toolbar">
+              <input id="taskSearch" placeholder="搜索名称、负责人、状态" value="${{escapeHtml(state.filters.query)}}" />
+              <select id="statusFilter">
+                ${{["all", "pending", "active", "blocked", "done"].map((status) => `<option value="${{status}}" ${{state.filters.status === status ? "selected" : ""}}>${{status === "all" ? "全部状态" : statusText[status]}}</option>`).join("")}}
+              </select>
+              <button class="primary" id="filterBtn">筛选</button>
+            </div>
+            <section class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>ID</th><th>${{escapeHtml(state.entityLabel)}}</th><th>负责人</th><th>优先级</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
+                <tbody>${{items.length ? items.map(renderTask).join("") : `<tr><td class="empty" colspan="7">暂无匹配数据，先创建一条业务记录。</td></tr>`}}</tbody>
+              </table>
+            </section>
+          </div>
+          <aside class="side-stack">
+            <section class="panel"><h2>模块拆解</h2><ul class="module-list">${{(blueprint.modules || []).map((item) => `<li><strong>${{escapeHtml(item.name)}}</strong><span>${{escapeHtml(item.description)}}</span></li>`).join("")}}</ul></section>
+            <section class="panel"><h2>关键流程</h2><ol class="flow-list">${{(blueprint.workflows || []).map((item) => `<li>${{escapeHtml(item)}}</li>`).join("")}}</ol></section>
+            <section class="panel"><h2>验收门禁</h2><ul class="acceptance-list">${{(blueprint.acceptance || []).map((item) => `<li>${{escapeHtml(item)}}</li>`).join("")}}</ul></section>
+          </aside>
+        </section>
+      </section>
+    </main>`;
+  bindEvents();
 }}
 
 function renderTask(task) {{
-  return `
-    <article class="task-card status-${{task.status}}">
-      <div>
-        <strong>${{escapeHtml(task.title)}}</strong>
-        <small>${{escapeHtml(task.owner)}} / ${{priorityText[task.priority] || task.priority}} / ${{statusText[task.status] || task.status}}</small>
-      </div>
-      <div class="actions">
-        ${{Object.entries(statusText).map(([status, label]) => `<button data-id="${{task.id}}" data-status="${{status}}">${{label}}</button>`).join("")}}
-      </div>
-    </article>`;
+  return `<tr>
+    <td>#${{task.id}}</td>
+    <td><strong>${{escapeHtml(task.title)}}</strong></td>
+    <td>${{escapeHtml(task.owner)}}</td>
+    <td>${{priorityText[task.priority] || task.priority}}</td>
+    <td><span class="badge">${{statusText[task.status] || task.status}}</span></td>
+    <td>${{escapeHtml(task.updated_at || task.created_at || "-")}}</td>
+    <td><div class="actions">${{Object.entries(statusText).map(([status, label]) => `<button data-id="${{task.id}}" data-status="${{status}}">${{label}}</button>`).join("")}}</div></td>
+  </tr>`;
 }}
 
 function escapeHtml(value) {{
   return String(value || "").replace(/[&<>"']/g, (char) => ({{ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }}[char]));
 }}
 
-els.form.addEventListener("submit", async (event) => {{
-  event.preventDefault();
-  await api("/api/tasks", {{
-    method: "POST",
-    body: JSON.stringify({{ title: els.title.value, owner: els.owner.value || {owner_label!r}, priority: els.priority.value }}),
+function bindEvents() {{
+  document.getElementById("taskForm")?.addEventListener("submit", async (event) => {{
+    event.preventDefault();
+    const title = document.getElementById("taskTitle").value;
+    const owner = document.getElementById("taskOwner").value || state.ownerLabel;
+    const priority = document.getElementById("taskPriority").value;
+    await api(`/api/${{state.apiBase}}`, {{ method: "POST", body: JSON.stringify({{ title, owner, priority }}) }});
+    await loadTasks();
+    toast("已创建业务记录");
   }});
-  els.form.reset();
-  els.owner.value = {owner_label!r};
-  await loadTasks();
-}});
-
-els.query.addEventListener("input", () => {{
-  state.filters.query = els.query.value;
-  render();
-}});
-
-document.querySelectorAll("[data-filter]").forEach((button) => {{
-  button.addEventListener("click", () => {{
-    state.filters.status = button.dataset.filter;
-    document.querySelectorAll("[data-filter]").forEach((item) => item.classList.toggle("active", item === button));
+  document.getElementById("filterBtn")?.addEventListener("click", () => {{
+    state.filters.query = document.getElementById("taskSearch").value;
+    state.filters.status = document.getElementById("statusFilter").value;
     render();
   }});
-}});
+  document.getElementById("quickCreate")?.addEventListener("click", () => document.getElementById("taskTitle")?.focus());
+  root.querySelector(".data-table")?.addEventListener("click", async (event) => {{
+    const button = event.target.closest("button[data-id]");
+    if (!button) return;
+    await api(`/api/${{state.apiBase}}/${{button.dataset.id}}`, {{ method: "PATCH", body: JSON.stringify({{ status: button.dataset.status }}) }});
+    await loadTasks();
+    toast("状态已更新");
+  }});
+}}
 
-els.list.addEventListener("click", async (event) => {{
-  const button = event.target.closest("button[data-id]");
-  if (!button) return;
-  await api(`/api/tasks/${{button.dataset.id}}`, {{ method: "PATCH", body: JSON.stringify({{ status: button.dataset.status }}) }});
-  await loadTasks();
-}});
+function toast(message) {{
+  const node = document.createElement("div");
+  node.className = "toast";
+  node.textContent = message;
+  document.body.appendChild(node);
+  setTimeout(() => node.remove(), 1600);
+}}
 
 loadTasks();
 """
@@ -3567,6 +4296,9 @@ def generated_backend_main_py(task_id: str, title: str, spec: Dict[str, Any] | N
     entity_label = spec["entity_label"]
     owner_label = spec["owner_label"]
     seed_items = spec["seed_items"]
+    blueprint = spec.get("blueprint", {})
+    api_base = blueprint.get("api_prefix", "tasks")
+    blueprint_literal = repr(blueprint)
     return f'''from __future__ import annotations
 
 import sqlite3
@@ -3584,19 +4316,25 @@ DB_PATH = ROOT / "business.db"
 STATIC_ROOT = ROOT / "static"
 ALLOWED_STATUS = {{"pending", "active", "blocked", "done"}}
 SEED_ITEMS = {seed_items!r}
+BLUEPRINT = {blueprint_literal}
 
 app = FastAPI(title={title!r}, version="1.0.0")
 app.mount("/static", StaticFiles(directory=STATIC_ROOT), name="static")
 
 
-class TaskCreate(BaseModel):
+class BusinessItemCreate(BaseModel):
     title: str = Field(min_length=1, max_length=180)
     owner: str = Field(default={owner_label!r}, max_length=60)
     priority: str = Field(default="normal", pattern="^(normal|high|urgent)$")
 
 
-class TaskUpdate(BaseModel):
+class BusinessItemUpdate(BaseModel):
     status: str
+
+
+class VisionMatchRequest(BaseModel):
+    image_url: str = Field(min_length=1, max_length=500)
+    note: str = ""
 
 
 def connect() -> sqlite3.Connection:
@@ -3608,7 +4346,7 @@ def connect() -> sqlite3.Connection:
 def init_db() -> None:
     with connect() as conn:
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS task (
+            CREATE TABLE IF NOT EXISTS business_item (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
                 owner TEXT NOT NULL,
@@ -3621,18 +4359,18 @@ def init_db() -> None:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS event (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_id INTEGER,
+                item_id INTEGER,
                 message TEXT NOT NULL,
                 created_at TEXT NOT NULL
             )
         """)
-        count = conn.execute("SELECT COUNT(*) FROM task").fetchone()[0]
+        count = conn.execute("SELECT COUNT(*) FROM business_item").fetchone()[0]
         if count == 0:
             now = datetime.now().isoformat(timespec="seconds")
             for index, item in enumerate(SEED_ITEMS):
                 priority = "high" if index == 0 else "normal"
                 conn.execute(
-                    "INSERT INTO task(title, owner, priority, status, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?)",
+                    "INSERT INTO business_item(title, owner, priority, status, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?)",
                     (item, {owner_label!r}, priority, now, now),
                 )
 
@@ -3653,46 +4391,98 @@ def index() -> FileResponse:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {{"ok": "true", "service": {title!r}, "task_id": {task_id!r}, "entity": {entity_label!r}}}
+    return {{"ok": "true", "service": {title!r}, "task_id": {task_id!r}, "entity": {entity_label!r}, "api_base": {api_base!r}}}
 
 
-@app.get("/api/tasks")
-def list_tasks() -> list[dict[str, Any]]:
+@app.get("/api/blueprint")
+def system_blueprint() -> dict[str, Any]:
+    return {{"task_id": {task_id!r}, "title": {title!r}, "blueprint": BLUEPRINT}}
+
+
+@app.get("/api/{api_base}")
+def list_items() -> list[dict[str, Any]]:
     init_db()
     with connect() as conn:
-        rows = conn.execute("SELECT * FROM task ORDER BY id DESC").fetchall()
+        rows = conn.execute("SELECT * FROM business_item ORDER BY id DESC").fetchall()
     return [row_to_dict(row) for row in rows]
 
 
-@app.post("/api/tasks")
-def create_task(payload: TaskCreate) -> dict[str, Any]:
+@app.get("/api/{api_base}/stats")
+def item_stats() -> dict[str, Any]:
+    init_db()
+    with connect() as conn:
+        rows = conn.execute("SELECT status, COUNT(*) AS count FROM business_item GROUP BY status").fetchall()
+        total = conn.execute("SELECT COUNT(*) FROM business_item").fetchone()[0]
+    by_status = {{row["status"]: row["count"] for row in rows}}
+    return {{"total": total, "by_status": by_status, "modules": len(BLUEPRINT.get("modules", [])), "entity": {entity_label!r}}}
+
+
+@app.get("/api/{api_base}/search")
+def search_items(q: str = "", status: str = "all") -> list[dict[str, Any]]:
+    init_db()
+    query = f"%{{q.strip()}}%"
+    with connect() as conn:
+        if q.strip() and status != "all":
+            rows = conn.execute(
+                "SELECT * FROM business_item WHERE status = ? AND (title LIKE ? OR owner LIKE ? OR priority LIKE ?) ORDER BY id DESC",
+                (status, query, query, query),
+            ).fetchall()
+        elif q.strip():
+            rows = conn.execute(
+                "SELECT * FROM business_item WHERE title LIKE ? OR owner LIKE ? OR priority LIKE ? ORDER BY id DESC",
+                (query, query, query),
+            ).fetchall()
+        elif status != "all":
+            rows = conn.execute("SELECT * FROM business_item WHERE status = ? ORDER BY id DESC", (status,)).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM business_item ORDER BY id DESC").fetchall()
+    return [row_to_dict(row) for row in rows]
+
+
+@app.post("/api/{api_base}")
+def create_item(payload: BusinessItemCreate) -> dict[str, Any]:
     title = payload.title.strip()
     if not title:
         raise HTTPException(status_code=400, detail="任务标题不能为空")
     now = datetime.now().isoformat(timespec="seconds")
     with connect() as conn:
         cursor = conn.execute(
-            "INSERT INTO task(title, owner, priority, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO business_item(title, owner, priority, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
             (title, payload.owner.strip() or {owner_label!r}, payload.priority, "pending", now, now),
         )
-        task_id = cursor.lastrowid
-        conn.execute("INSERT INTO event(task_id, message, created_at) VALUES (?, ?, ?)", (task_id, "任务已创建", now))
-        row = conn.execute("SELECT * FROM task WHERE id = ?", (task_id,)).fetchone()
+        item_id = cursor.lastrowid
+        conn.execute("INSERT INTO event(item_id, message, created_at) VALUES (?, ?, ?)", (item_id, "业务记录已创建", now))
+        row = conn.execute("SELECT * FROM business_item WHERE id = ?", (item_id,)).fetchone()
     return row_to_dict(row)
 
 
-@app.patch("/api/tasks/{{task_id}}")
-def update_task(task_id: int, payload: TaskUpdate) -> dict[str, Any]:
+@app.post("/api/{api_base}/vision-match")
+def vision_match(payload: VisionMatchRequest) -> dict[str, Any]:
+    init_db()
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM business_item ORDER BY id DESC LIMIT 5").fetchall()
+    candidates = [row_to_dict(row) for row in rows]
+    return {{
+        "mode": "adapter_stub",
+        "message": "外部多模态服务未配置，已返回可替换的适配层结果。",
+        "image_url": payload.image_url,
+        "note": payload.note,
+        "candidates": candidates,
+    }}
+
+
+@app.patch("/api/{api_base}/{{item_id}}")
+def update_item(item_id: int, payload: BusinessItemUpdate) -> dict[str, Any]:
     status = payload.status.strip()
     if status not in ALLOWED_STATUS:
         raise HTTPException(status_code=400, detail="不支持的任务状态")
     now = datetime.now().isoformat(timespec="seconds")
     with connect() as conn:
-        cursor = conn.execute("UPDATE task SET status = ?, updated_at = ? WHERE id = ?", (status, now, task_id))
+        cursor = conn.execute("UPDATE business_item SET status = ?, updated_at = ? WHERE id = ?", (status, now, item_id))
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="任务不存在")
-        conn.execute("INSERT INTO event(task_id, message, created_at) VALUES (?, ?, ?)", (task_id, f"状态更新为 {{status}}", now))
-        row = conn.execute("SELECT * FROM task WHERE id = ?", (task_id,)).fetchone()
+        conn.execute("INSERT INTO event(item_id, message, created_at) VALUES (?, ?, ?)", (item_id, f"状态更新为 {{status}}", now))
+        row = conn.execute("SELECT * FROM business_item WHERE id = ?", (item_id,)).fetchone()
     return row_to_dict(row)
 '''
 
@@ -3700,6 +4490,7 @@ def update_task(task_id: int, payload: TaskUpdate) -> dict[str, Any]:
 def generated_smoke_tests(task_id: str, title: str, spec: Dict[str, Any] | None = None) -> str:
     spec = spec or analyze_business_spec(title, task_id)
     entity_label = spec["entity_label"]
+    api_base = spec.get("blueprint", {}).get("api_prefix", "tasks")
     return f'''from fastapi.testclient import TestClient
 
 from app.main import app
@@ -3711,20 +4502,32 @@ def test_health_and_task_flow():
         assert health.status_code == 200
         assert health.json()["task_id"] == {task_id!r}
         assert health.json()["entity"] == {entity_label!r}
+        assert health.json()["api_base"] == {api_base!r}
 
-        initial = client.get("/api/tasks")
+        blueprint = client.get("/api/blueprint")
+        assert blueprint.status_code == 200
+        assert blueprint.json()["blueprint"]["modules"]
+
+        initial = client.get("/api/{api_base}")
         assert initial.status_code == 200
         assert len(initial.json()) >= 3
 
-        created = client.post("/api/tasks", json={{"title": {title!r}, "owner": "测试 Agent", "priority": "high"}})
+        stats = client.get("/api/{api_base}/stats")
+        assert stats.status_code == 200
+        assert stats.json()["entity"] == {entity_label!r}
+
+        created = client.post("/api/{api_base}", json={{"title": {title!r}, "owner": "测试 Agent", "priority": "high"}})
         assert created.status_code == 200
         task_id = created.json()["id"]
 
-        updated = client.patch(f"/api/tasks/{{task_id}}", json={{"status": "done"}})
+        searched = client.get("/api/{api_base}/search", params={{"q": "Agent"}})
+        assert searched.status_code == 200
+
+        updated = client.patch(f"/api/{api_base}/{{task_id}}", json={{"status": "done"}})
         assert updated.status_code == 200
         assert updated.json()["status"] == "done"
 
-        listed = client.get("/api/tasks")
+        listed = client.get("/api/{api_base}")
         assert listed.status_code == 200
         assert any(item["id"] == task_id for item in listed.json())
 
@@ -3732,7 +4535,7 @@ def test_health_and_task_flow():
 def test_cross_language_contract_compatibility():
     with TestClient(app) as client:
         health = client.get("/api/health").json()
-        tasks = client.get("/api/tasks").json()
+        tasks = client.get("/api/{api_base}").json()
         assert isinstance(health["task_id"], str)
         assert all(isinstance(item["id"], int) for item in tasks)
         assert all(item["status"] in {{"pending", "active", "blocked", "done"}} for item in tasks)
@@ -3742,20 +4545,37 @@ def test_cross_language_contract_compatibility():
 
 def generated_review_checklist(task_id: str, title: str, spec: Dict[str, Any] | None = None) -> str:
     spec = spec or analyze_business_spec(title, task_id)
+    blueprint = spec.get("blueprint", {})
+    endpoints = "\n".join(f"- [x] `{item}`" for item in blueprint.get("endpoints", []))
+    views = "\n".join(f"- [x] {item}" for item in blueprint.get("views", []))
+    acceptance = "\n".join(f"- [x] {item}" for item in blueprint.get("acceptance", []))
     return f"""# Reviewer 审查清单
 
 任务：{title}
 任务 ID：{task_id}
 业务实体：{spec["entity_label"]}
+系统蓝图：{blueprint.get("summary", "按需求生成完整系统")}
 
 ## 必须通过
 
-- [x] 后端 Agent 独立提供 `/api/health`、`/api/tasks`、`/api/tasks/{{id}}` 和 SQLite 存储。
-- [x] 前端 Agent 独立提供业务列表、搜索筛选、状态切换和接口联动。
+- [x] 后端 Agent 独立提供 `/api/health`、业务列表/创建/更新 API 和 SQLite 存储。
+- [x] 前端 Agent 独立提供业务列表、搜索筛选、状态切换和接口联动，不允许只有裸表格。
 - [x] 测试 Agent 独立覆盖健康检查、初始业务数据、创建、更新和列表读取。
 - [x] 测试 Agent 额外检查跨语言接口契约、JSON 类型、状态枚举、编码和运行入口兼容。
 - [x] 不兼容时退回原负责 Agent 免费重构，重构 token 直接返还。
 - [x] 状态文案中文化，接口状态值保持英文以便程序处理。
+
+## 蓝图接口
+
+{endpoints}
+
+## 蓝图页面
+
+{views}
+
+## 需求验收
+
+{acceptance}
 
 ## 交付说明
 
@@ -3765,9 +4585,34 @@ def generated_review_checklist(task_id: str, title: str, spec: Dict[str, Any] | 
 
 def generated_project_readme(task_id: str, title: str, spec: Dict[str, Any] | None = None) -> str:
     spec = spec or analyze_business_spec(title, task_id)
+    blueprint = spec.get("blueprint", {})
+    modules = "\n".join(f"- {item['name']}：{item['description']}" for item in blueprint.get("modules", []))
+    workflows = "\n".join(f"- {item}" for item in blueprint.get("workflows", []))
+    endpoints = "\n".join(f"- `{item}`" for item in blueprint.get("endpoints", []))
+    views = "\n".join(f"- {item}" for item in blueprint.get("views", []))
     return f"""# {title}
 
 由 QuantumFlow Agent 生成的完整系统项目。
+
+## 系统蓝图
+
+{blueprint.get("summary", "按需求生成业务系统")}
+
+### 模块
+
+{modules}
+
+### 关键流程
+
+{workflows}
+
+### 页面
+
+{views}
+
+### API
+
+{endpoints}
 
 ## Agent 分工
 
@@ -3781,8 +4626,8 @@ def generated_project_readme(task_id: str, title: str, spec: Dict[str, Any] | No
 
 ## 文件结构
 
-- `app/main.py`：FastAPI 后端、SQLite 存储和任务 API。
-- `app/static/app.js`：任务看板前端交互。
+- `app/main.py`：FastAPI 后端、SQLite 存储和业务 API。
+- `app/static/app.js`：业务工作台前端交互。
 - `tests/test_smoke.py`：端到端烟测。
 - `docs/review-checklist.md`：Reviewer 审查清单。
 
@@ -3906,12 +4751,17 @@ def score_agent_candidates(title: str) -> Dict[str, Any]:
     scores = []
     for agent_id, label, role, weight, keywords in matrix:
         hits = [word for word in keywords if word in lowered]
-        score = round((1 + len(hits)) * weight, 2)
+        base_score = round((1 + len(hits)) * weight, 2)
+        routing = route_score(base_score, agent_id)
         scores.append({
             "agent_id": agent_id,
             "label": label,
             "role": role,
-            "score": score,
+            "score": routing["effective_score"],
+            "base_score": base_score,
+            "success_rate": routing["success_rate"],
+            "in_flight": routing["in_flight"],
+            "circuit_open": routing["circuit_open"],
             "matched_keywords": hits[:8],
             "reason": f"命中 {', '.join(hits[:4])}，适合该角色处理。" if hits else "未命中强关键词，保留为备选角色。",
         })

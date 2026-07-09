@@ -1,3 +1,10 @@
 fastapi>=0.110
 uvicorn[standard]>=0.27
+pydantic>=2
+websockets>=12
 langchain>=0.2
+langchain-openai>=0.1
+# Optional alternative providers (uncomment if used via Model.py routing):
+# langchain-anthropic>=0.1
+# langchain-google-genai>=1
+# langchain-deepseek>=0.1
