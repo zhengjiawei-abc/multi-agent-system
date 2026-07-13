@@ -214,3 +214,43 @@ QuantumFlow 目前是 **Beta / 本地协作开发版**，适合继续开发、�
 ## 一句话
 
 QuantumFlow 想做的是一个能看见、能协作、能自动写代码、也能被人类接管的多智能体开发世界。
+
+## 命令行启动
+
+QuantumFlow 支持像 OpenClaw 一样从 CMD 或 PowerShell 启动。
+
+CMD：
+
+```cmd
+qflow desktop
+qflow server
+qflow platform
+qflow admin
+qflow status
+qflow stop
+```
+
+PowerShell：
+
+```powershell
+.\qflow.ps1 desktop
+.\qflow.ps1 server
+.\qflow.ps1 platform
+.\qflow.ps1 admin
+.\qflow.ps1 status
+.\qflow.ps1 stop
+```
+
+默认推荐：
+
+```cmd
+qflow desktop
+```
+
+这个命令会自动准备 Python 虚拟环境、启动 FastAPI 服务，并打开桌面/浏览器工作台。
+
+更多适用场景见：
+
+```text
+docs/project-scenarios.md
+```

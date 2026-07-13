@@ -34,6 +34,7 @@ release/
 .vscode/
 .DS_Store
 Thumbs.db
+.diskscan.txt
 
 # Local network / tunnel artifacts
 firewall_8765.txt
